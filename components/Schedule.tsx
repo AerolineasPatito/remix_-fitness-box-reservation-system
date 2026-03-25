@@ -2,13 +2,14 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { ClassInstance, AvailabilityState, Profile } from '../types.ts';
 import { ClassStatusBadge } from './ClassStatusBadge.tsx';
-import { resolveClassTypeFromSlug } from '../lib/routeHelpers.ts';
+import { resolveClassTypeFromSlug, slugifyClassType } from '../lib/routeHelpers.ts';
 import { api } from '../lib/api.ts';
 
 interface ScheduleProps {
   instances: ClassInstance[];
   availability: AvailabilityState;
   user?: Profile | null;
+  onUserProfileUpdate?: (profile: Profile) => void;
 }
 
 type ClassTypeRow = {
@@ -37,7 +38,7 @@ type DashboardData = {
   }>;
 };
 
-export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, user }) => {
+export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, user, onUserProfileUpdate }) => {
   const { serviceType } = useParams<{ serviceType: string }>();
   const navigate = useNavigate();
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
@@ -48,7 +49,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   const [cancelPreview, setCancelPreview] = useState<{ reservationId: string; isLate: boolean; limitHours: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const decodedService = resolveClassTypeFromSlug(serviceType || '');
+  const selectedSlug = (serviceType || '').toLowerCase();
+  const decodedService = useMemo(() => {
+    const fromClassTypes = Object.keys(classTypesByName).find((name) => slugifyClassType(name) === selectedSlug);
+    if (fromClassTypes) return fromClassTypes;
+    const fromInstances = instances.find((inst) => slugifyClassType(inst.type) === selectedSlug)?.type;
+    if (fromInstances) return fromInstances;
+    return resolveClassTypeFromSlug(serviceType || '');
+  }, [classTypesByName, instances, selectedSlug, serviceType]);
   const isStudent = user?.role === 'student';
   const colorThemeClass = (theme?: string | null) => {
     const value = (theme || '').toLowerCase();
@@ -108,7 +116,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   }, []);
 
   const activeDate = dates[selectedDayIdx];
-  const activeClasses = instances.filter((inst) => inst.type === decodedService && inst.date === activeDate.dateStr);
+  const activeClasses = instances.filter((inst) => slugifyClassType(inst.type) === selectedSlug && inst.date === activeDate.dateStr);
 
   const scroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -140,6 +148,12 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
     setCancelingReservationId(cancelPreview.reservationId);
     try {
       await api.cancelReservation(cancelPreview.reservationId);
+      if (user?.id) {
+        const updatedProfile = await api.getProfile(user.id);
+        if (updatedProfile && !updatedProfile.error) {
+          onUserProfileUpdate?.(updatedProfile);
+        }
+      }
       await reloadStudentDashboard();
       setCancelPreview(null);
     } finally {
@@ -161,12 +175,12 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
               <i className={`fas ${cancelPreview.isLate ? 'fa-triangle-exclamation' : 'fa-circle-check'} text-xl`}></i>
             </div>
             <h4 className="text-3xl font-bebas tracking-tight uppercase italic text-zinc-900">
-              {cancelPreview.isLate ? 'Cancelacion tardia' : 'Cancelacion sin penalizacion'}
+              {cancelPreview.isLate ? 'Cancelación tardía' : 'Cancelación sin penalización'}
             </h4>
             <p className="mt-3 text-sm text-zinc-600">
               {cancelPreview.isLate
-                ? `Estas cancelando con menos de ${cancelPreview.limitHours} horas de anticipacion. Se libera tu lugar, pero pierdes el credito.`
-                : `Estas dentro del limite de ${cancelPreview.limitHours} horas o mas. Tu credito sera devuelto.`}
+                ? `Estás cancelando con menos de ${cancelPreview.limitHours} horas de anticipación. Se libera tu lugar, pero pierdes el crédito.`
+                : `Estás dentro del límite de ${cancelPreview.limitHours} horas o más. Tu crédito será devuelto.`}
             </p>
             <div className="mt-8 flex gap-3">
               <button
@@ -225,7 +239,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                 <h3 className="mt-3 text-3xl font-bebas tracking-wide uppercase italic">{dashboard.activeSubscription.package_name || 'Paquete activo'}</h3>
                 <div className="mt-4 flex flex-wrap items-center gap-6">
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-400">Creditos</p>
+                    <p className="text-[10px] uppercase tracking-widest text-zinc-400">Créditos</p>
                     <p className="text-3xl font-bebas">{dashboard.activeSubscription.clases_restantes} / {dashboard.activeSubscription.clases_totales}</p>
                   </div>
                   <div>
@@ -303,7 +317,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
             </div>
           ) : (
             <div className="py-8 text-center rounded-2xl border border-dashed border-zinc-200">
-              <p className="text-sm text-zinc-400">No tienes clases reservadas para los proximos dias.</p>
+                  <p className="text-sm text-zinc-400">No tienes clases reservadas para los próximos días.</p>
             </div>
           )}
         </div>
@@ -326,7 +340,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
 
         <div ref={scrollRef} className="flex items-center space-x-4 overflow-x-auto hide-scrollbar pb-8 pt-2 px-2">
           {dates.map((d, idx) => {
-            const hasClasses = instances.some((i) => i.date === d.dateStr && i.type === decodedService);
+            const hasClasses = instances.some((i) => i.date === d.dateStr && slugifyClassType(i.type) === selectedSlug);
             const isSelected = selectedDayIdx === idx;
             const showMonthDivider = idx > 0 && dates[idx].month !== dates[idx - 1].month;
 
@@ -400,7 +414,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-sm font-black text-zinc-900 uppercase tracking-tight">Duracion: 60 MIN</p>
+                  <p className="text-sm font-black text-zinc-900 uppercase tracking-tight">Duración: 60 MIN</p>
                   <div className="flex items-center text-zinc-400">
                     <i className="fas fa-map-marker-alt text-[10px] mr-2"></i>
                     <span className="text-[10px] font-bold uppercase tracking-widest">Focus Main Studio</span>
@@ -430,7 +444,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                 ) : isInProgress ? (
                   <div className="px-10 py-5 bg-amber-100 text-amber-700 rounded-2xl font-bold text-[10px] tracking-widest uppercase border border-amber-200 cursor-not-allowed">En Curso</div>
                 ) : (
-                  <div className="px-10 py-5 bg-zinc-50 text-zinc-300 rounded-2xl font-bold text-[10px] tracking-widest uppercase border border-zinc-100 cursor-not-allowed italic">Sesion Agotada</div>
+                  <div className="px-10 py-5 bg-zinc-50 text-zinc-300 rounded-2xl font-bold text-[10px] tracking-widest uppercase border border-zinc-100 cursor-not-allowed italic">Sesión Agotada</div>
                 )}
               </div>
             </div>
@@ -442,7 +456,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
             <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-8 shadow-sm group-hover:scale-110 transition-transform duration-500">
               <i className="fas fa-calendar-day text-zinc-100 text-4xl"></i>
             </div>
-            <h4 className="text-xl font-bebas text-zinc-400 mb-2 tracking-wide uppercase">Dia sin sesiones</h4>
+            <h4 className="text-xl font-bebas text-zinc-400 mb-2 tracking-wide uppercase">Día sin sesiones</h4>
             <p className="text-zinc-400 font-bold uppercase text-[9px] tracking-widest max-w-xs mx-auto leading-relaxed">
               No hay horarios para el <span className="text-zinc-900">{activeDate.dayNum} de {activeDate.fullMonth}</span>. Por favor intenta otra fecha arriba.
             </p>
@@ -453,9 +467,9 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
       <div className="bg-zinc-900 rounded-[2.5rem] p-10 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative">
         <div className="absolute top-0 right-0 w-64 h-64 bg-brand/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
         <div className="relative z-10 space-y-2">
-          <h5 className="text-brand font-bebas text-2xl tracking-wide uppercase">Politica de Respeto</h5>
+          <h5 className="text-brand font-bebas text-2xl tracking-wide uppercase">Política de Respeto</h5>
           <p className="text-zinc-400 text-xs font-medium max-w-md">
-            Recuerda cancelar con al menos <span className="text-white font-bold underline decoration-brand underline-offset-4">{publicSettings.cancellation_limit_hours} horas de anticipacion</span> para evitar penalizacion de credito.
+            Recuerda cancelar con al menos <span className="text-white font-bold underline decoration-brand underline-offset-4">{publicSettings.cancellation_limit_hours} horas de anticipación</span> para evitar penalización de crédito.
           </p>
         </div>
         <div className="relative z-10 w-16 h-16 rounded-2xl border border-zinc-800 flex items-center justify-center text-zinc-700">

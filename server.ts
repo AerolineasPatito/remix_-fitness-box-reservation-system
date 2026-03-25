@@ -254,6 +254,8 @@ async function startServer() {
         image_url TEXT,
         icon TEXT,
         color_theme TEXT,
+        description TEXT,
+        duration INTEGER NOT NULL DEFAULT 60,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -274,21 +276,60 @@ async function startServer() {
     `);
 
     const createId = (prefix = '') => `${prefix}${Math.random().toString(36).slice(2, 11)}`;
+    addColumnIfMissing('class_types', 'description', 'TEXT');
+    addColumnIfMissing('class_types', 'duration', 'INTEGER DEFAULT 60');
 
     const classTypesCount = db.prepare(`SELECT COUNT(*) as count FROM class_types`).get() as { count: number };
     if ((classTypesCount?.count || 0) === 0) {
       const defaults = [
-        { name: 'Entrenamiento Funcional', image_url: '', icon: 'fa-bolt', color_theme: 'amber' },
-        { name: 'Sculpt and Strength', image_url: '', icon: 'fa-dumbbell', color_theme: 'cyan' },
-        { name: 'HIIT Conditioning', image_url: '', icon: 'fa-heartbeat', color_theme: 'rose' },
-        { name: 'Sculpt Lower Body', image_url: '', icon: 'fa-shoe-prints', color_theme: 'indigo' },
-        { name: 'Full Body', image_url: '', icon: 'fa-user-check', color_theme: 'emerald' }
+        {
+          name: 'Entrenamiento Funcional',
+          image_url: '',
+          icon: 'fa-bolt',
+          color_theme: 'amber',
+          description: 'Entrenamiento dinamico para fuerza funcional y movilidad.',
+          duration: 60
+        },
+        {
+          name: 'Sculpt and Strength',
+          image_url: '',
+          icon: 'fa-dumbbell',
+          color_theme: 'cyan',
+          description: 'Tonificacion y fuerza con enfoque en tecnica y control.',
+          duration: 60
+        },
+        {
+          name: 'HIIT Conditioning',
+          image_url: '',
+          icon: 'fa-heartbeat',
+          color_theme: 'rose',
+          description: 'Alta intensidad para resistencia cardiovascular y quema calorica.',
+          duration: 60
+        },
+        {
+          name: 'Sculpt Lower Body',
+          image_url: '',
+          icon: 'fa-shoe-prints',
+          color_theme: 'indigo',
+          description: 'Trabajo especifico de tren inferior y estabilidad.',
+          duration: 60
+        },
+        {
+          name: 'Full Body',
+          image_url: '',
+          icon: 'fa-user-check',
+          color_theme: 'emerald',
+          description: 'Sesión integral para todo el cuerpo.',
+          duration: 60
+        }
       ];
       const insertType = db.prepare(`
-        INSERT INTO class_types (id, name, image_url, icon, color_theme, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO class_types (id, name, image_url, icon, color_theme, description, duration, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `);
-      defaults.forEach((row) => insertType.run(createId('ctype_'), row.name, row.image_url, row.icon, row.color_theme));
+      defaults.forEach((row) =>
+        insertType.run(createId('ctype_'), row.name, row.image_url, row.icon, row.color_theme, row.description, row.duration)
+      );
     }
 
     const existingCancellationSetting = db.prepare(`
@@ -626,7 +667,7 @@ async function startServer() {
   // Global Error Handler for JSON
   app.use((err: any, req: any, res: any, next: any) => {
     console.error('Server Error:', err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+      res.status(500).json({ error: 'Ocurrió un error interno en el servidor.', details: err.message });
   });
 
   // Auth Routes
@@ -642,12 +683,12 @@ async function startServer() {
     
     try {
       if (!email || !password) {
-        return res.status(400).json({ error: 'Email y contraseña son requeridos' });
+      return res.status(400).json({ error: 'El correo electrónico y la contraseña son obligatorios.' });
       }
       const existing = db.prepare('SELECT * FROM profiles WHERE email = ?').get(email);
       if (existing) {
         console.log('⚠️  Email ya registrado:', email);
-        return res.status(400).json({ error: 'El email ya está registrado' });
+      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
       }
 
       const id = Math.random().toString(36).substr(2, 9);
@@ -708,7 +749,7 @@ async function startServer() {
         console.log('❌ Error al enviar email de verificación');
         // Si no se puede enviar el email, eliminar el usuario
         db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
-        res.json({ success: false, error: 'No se pudo enviar el email de verificación. Por favor intenta nuevamente.' });
+          res.json({ success: false, error: 'No se pudo enviar el correo de verificación. Por favor, intenta nuevamente.' });
       }
     } catch (error: any) {
       console.error('❌ Error en registro:', error.message);
@@ -724,7 +765,7 @@ async function startServer() {
     
     try {
       if (!email || !password) {
-        return res.status(400).json({ error: 'Email y contraseña son requeridos' });
+      return res.status(400).json({ error: 'El correo electrónico y la contraseña son obligatorios.' });
       }
       // Allow login by email or username (for admin)
       const profile = db.prepare('SELECT * FROM profiles WHERE email = ?').get(email) as any;
@@ -818,7 +859,7 @@ async function startServer() {
     if (profile) {
       res.json(profile);
     } else {
-      res.status(404).json({ error: 'Profile not found' });
+      res.status(404).json({ error: 'No se encontró el perfil solicitado.' });
     }
   });
 
@@ -834,7 +875,7 @@ async function startServer() {
           AND deleted_at IS NULL
       `).get(studentId);
 
-      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+      if (!profile) return res.status(404).json({ error: 'No se encontró el perfil solicitado.' });
 
       const activeSubscription = db.prepare(`
         SELECT s.*, p.nombre as package_name, p.capacidad as package_capacity
@@ -894,7 +935,7 @@ async function startServer() {
         upcomingReservations
       });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch dashboard', details: error.message });
+      res.status(500).json({ error: 'No se pudo cargar el dashboard del alumno.', details: error.message });
     }
   });
 
@@ -902,7 +943,7 @@ async function startServer() {
     const { userId, classId } = req.body;
     
     if (!userId || !classId) {
-      return res.status(400).json({ error: 'userId and classId are required' });
+      return res.status(400).json({ error: 'Se requieren el ID del alumno y el ID de la clase.' });
     }
 
     try {
@@ -1100,7 +1141,7 @@ async function startServer() {
       `).all();
       res.json(packages);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch packages', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar los paquetes.', details: error.message });
     }
   });
 
@@ -1148,7 +1189,7 @@ async function startServer() {
       const created = db.prepare('SELECT * FROM paquetes WHERE id = ?').get(id);
       res.json({ success: true, package: created });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to create package', details: error.message });
+      res.status(500).json({ error: 'No se pudo crear el paquete.', details: error.message });
     }
   });
 
@@ -1188,7 +1229,7 @@ async function startServer() {
       const updated = db.prepare('SELECT * FROM paquetes WHERE id = ?').get(req.params.id);
       res.json({ success: true, package: updated });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to update package', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar el paquete.', details: error.message });
     }
   });
 
@@ -1204,7 +1245,7 @@ async function startServer() {
       `).run(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to delete package', details: error.message });
+      res.status(500).json({ error: 'No se pudo desactivar el paquete.', details: error.message });
     }
   });
 
@@ -1321,7 +1362,7 @@ async function startServer() {
 
       res.json({ success: true, subscription, payment, actor_id: actor_id || null });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to create subscription', details: error.message });
+      res.status(500).json({ error: 'No se pudo crear la suscripción.', details: error.message });
     }
   });
 
@@ -1340,7 +1381,7 @@ async function startServer() {
       `).all(req.params.id);
       res.json(beneficiaries);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch beneficiaries', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar los beneficiarios.', details: error.message });
     }
   });
 
@@ -1420,7 +1461,7 @@ async function startServer() {
       if (error.message === 'CAPACITY_EXCEEDED') {
         return res.status(400).json({ error: 'La suscripción ya alcanzó la capacidad del paquete.' });
       }
-      res.status(500).json({ error: 'Failed to add beneficiary', details: error.message });
+      res.status(500).json({ error: 'No se pudo agregar el beneficiario.', details: error.message });
     }
   });
 
@@ -1485,7 +1526,7 @@ async function startServer() {
       const updated = db.prepare('SELECT * FROM suscripciones_alumno WHERE id = ?').get(subscriptionId);
       res.json({ success: true, subscription: updated });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to freeze/resume subscription', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar el estado de congelamiento de la suscripción.', details: error.message });
     }
   });
 
@@ -1589,7 +1630,7 @@ async function startServer() {
 
       res.json(payload);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch community', details: error.message });
+      res.status(500).json({ error: 'No se pudo cargar la comunidad.', details: error.message });
     }
   });
 
@@ -1615,7 +1656,7 @@ async function startServer() {
       const updated = db.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
       res.json({ success: true, student: updated });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to update student', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar la información del alumno.', details: error.message });
     }
   });
 
@@ -1771,9 +1812,9 @@ async function startServer() {
         return res.status(400).json({ error: 'No se puede dejar clases restantes en negativo' });
       }
       if (error.message === 'NO_ACTIVE_SUBSCRIPTION') {
-        return res.status(400).json({ error: 'No hay suscripción activa para descontar clases' });
+        return res.status(400).json({ error: 'No hay una suscripción activa para descontar clases.' });
       }
-      res.status(500).json({ error: 'Failed to apply manual credit adjustment', details: error.message });
+      res.status(500).json({ error: 'No se pudo aplicar el ajuste manual de créditos.', details: error.message });
     }
   });
 
@@ -1981,7 +2022,7 @@ async function startServer() {
       if (error.message === 'CLASS_NOT_ACTIVE') {
         return res.status(400).json({ error: 'La clase no está activa.' });
       }
-      res.status(500).json({ error: 'Failed to register attendance', details: error.message });
+      res.status(500).json({ error: 'No se pudo registrar la asistencia.', details: error.message });
     }
   });
 
@@ -2082,7 +2123,7 @@ async function startServer() {
 
       res.json({ subscriptions: normalizedSubscriptions, transactions, adjustments, activity });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch student subscriptions', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar las suscripciones del alumno.', details: error.message });
     }
   });
 
@@ -2206,7 +2247,7 @@ async function startServer() {
         }
       });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to generate cash cut report', details: error.message });
+      res.status(500).json({ error: 'No se pudo generar el reporte de corte de caja.', details: error.message });
     }
   });
 
@@ -2215,7 +2256,7 @@ async function startServer() {
     const id = Math.random().toString(36).substr(2, 9);
     try {
       if (!class_type_id) {
-        return res.status(400).json({ error: 'class_type_id is required' });
+        return res.status(400).json({ error: 'Se requiere el tipo de clase.' });
       }
 
       const classType = db.prepare(`
@@ -2226,7 +2267,7 @@ async function startServer() {
       `).get(class_type_id) as { id: string; name: string } | undefined;
 
       if (!classType) {
-        return res.status(400).json({ error: 'Invalid class_type_id' });
+        return res.status(400).json({ error: 'El tipo de clase seleccionado no es válido.' });
       }
 
       db.prepare(`
@@ -2244,7 +2285,7 @@ async function startServer() {
       );
       res.json({ success: true, id });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to create class' });
+      res.status(500).json({ error: 'No se pudo crear la clase.' });
     }
   });
 
@@ -2341,7 +2382,7 @@ async function startServer() {
       if (error.message === 'RESERVATION_NOT_FOUND') {
         return res.status(404).json({ error: 'Reserva no encontrada' });
       }
-      res.status(500).json({ error: 'Failed to cancel reservation', details: error.message });
+      res.status(500).json({ error: 'No se pudo cancelar la reserva.', details: error.message });
     }
   });
 
@@ -2353,7 +2394,7 @@ async function startServer() {
         : db.prepare(`SELECT * FROM class_types WHERE is_active = 1 ORDER BY name ASC`).all();
       res.json(rows);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch class types', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar los tipos de entrenamiento.', details: error.message });
     }
   });
 
@@ -2362,46 +2403,66 @@ async function startServer() {
       const cancellationLimit = getCancellationLimitHours();
       res.json({ cancellation_limit_hours: cancellationLimit });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch public settings', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar los ajustes públicos.', details: error.message });
     }
   });
 
   app.post('/api/class-types', (req, res) => {
     try {
-      const { name, image_url, icon, color_theme, is_active } = req.body;
-      if (!name) return res.status(400).json({ error: 'name is required' });
+      const { name, image_url, icon, color_theme, description, duration, is_active } = req.body;
+      if (!name) return res.status(400).json({ error: 'El nombre del tipo de entrenamiento es obligatorio.' });
 
       const id = createId('ctype_');
       db.prepare(`
-        INSERT INTO class_types (id, name, image_url, icon, color_theme, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `).run(id, name, image_url || null, icon || null, color_theme || null, is_active === 0 ? 0 : 1);
+        INSERT INTO class_types (id, name, image_url, icon, color_theme, description, duration, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(
+        id,
+        name,
+        image_url || null,
+        icon || null,
+        color_theme || null,
+        description || null,
+        Number(duration || 60),
+        is_active === 0 ? 0 : 1
+      );
 
       const created = db.prepare(`SELECT * FROM class_types WHERE id = ?`).get(id);
       res.json({ success: true, classType: created });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to create class type', details: error.message });
+      res.status(500).json({ error: 'No se pudo crear el tipo de entrenamiento.', details: error.message });
     }
   });
 
   app.put('/api/class-types/:id', (req, res) => {
     try {
-      const { name, image_url, icon, color_theme, is_active } = req.body;
+      const { name, image_url, icon, color_theme, description, duration, is_active } = req.body;
       db.prepare(`
         UPDATE class_types
         SET name = COALESCE(?, name),
             image_url = ?,
             icon = ?,
             color_theme = ?,
+            description = ?,
+            duration = COALESCE(?, duration),
             is_active = COALESCE(?, is_active),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(name || null, image_url || null, icon || null, color_theme || null, is_active, req.params.id);
+      `).run(
+        name || null,
+        image_url || null,
+        icon || null,
+        color_theme || null,
+        description || null,
+        duration != null ? Number(duration) : null,
+        is_active,
+        req.params.id
+      );
 
       const updated = db.prepare(`SELECT * FROM class_types WHERE id = ?`).get(req.params.id);
       res.json({ success: true, classType: updated });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to update class type', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar el tipo de entrenamiento.', details: error.message });
     }
   });
 
@@ -2415,7 +2476,7 @@ async function startServer() {
       `).run(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to delete class type', details: error.message });
+      res.status(500).json({ error: 'No se pudo desactivar el tipo de entrenamiento.', details: error.message });
     }
   });
 
@@ -2425,7 +2486,7 @@ async function startServer() {
       db.prepare("UPDATE classes SET status = 'canceled', canceled_by = ? WHERE id = ?").run(canceled_by, req.params.id);
       res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to cancel class' });
+      res.status(500).json({ error: 'No se pudo cancelar la clase.' });
     }
   });
 
@@ -2434,7 +2495,7 @@ async function startServer() {
       db.prepare('DELETE FROM classes WHERE id = ?').run(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to delete class' });
+      res.status(500).json({ error: 'No se pudo eliminar la clase.' });
     }
   });
 
@@ -2445,7 +2506,7 @@ async function startServer() {
       const updated = db.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
       res.json(updated);
     } catch (error) {
-      res.status(500).json({ error: 'Failed to update credits' });
+      res.status(500).json({ error: 'No se pudieron actualizar los créditos.' });
     }
   });
 
@@ -2554,7 +2615,7 @@ async function startServer() {
       `).all();
       res.json(rows);
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to fetch settings', details: error.message });
+      res.status(500).json({ error: 'No se pudieron cargar los ajustes del sistema.', details: error.message });
     }
   });
 
@@ -2562,7 +2623,7 @@ async function startServer() {
     try {
       const { setting_key, setting_value } = req.body;
       if (!setting_key || setting_value == null) {
-        return res.status(400).json({ error: 'setting_key and setting_value are required' });
+      return res.status(400).json({ error: 'Se requieren la clave y el valor del ajuste.' });
       }
       db.prepare(`
         INSERT INTO system_settings (setting_key, setting_value, updated_at)
@@ -2570,7 +2631,7 @@ async function startServer() {
       `).run(String(setting_key), String(setting_value));
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to create setting', details: error.message });
+      res.status(500).json({ error: 'No se pudo crear el ajuste.', details: error.message });
     }
   });
 
@@ -2579,7 +2640,7 @@ async function startServer() {
       const key = req.params.key;
       const { setting_value } = req.body;
       if (setting_value == null || String(setting_value).trim() === '') {
-        return res.status(400).json({ error: 'setting_value is required' });
+      return res.status(400).json({ error: 'El valor del ajuste es obligatorio.' });
       }
 
       db.prepare(`
@@ -2596,7 +2657,7 @@ async function startServer() {
       `).get(key);
       res.json({ success: true, setting: row });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to update setting', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar el ajuste.', details: error.message });
     }
   });
 
@@ -2604,12 +2665,12 @@ async function startServer() {
     try {
       const key = req.params.key;
       if (key === 'cancellation_limit_hours') {
-        return res.status(400).json({ error: 'Cannot delete required setting cancellation_limit_hours' });
+        return res.status(400).json({ error: 'No se puede eliminar el ajuste obligatorio de límite de cancelación.' });
       }
       db.prepare(`DELETE FROM system_settings WHERE setting_key = ?`).run(key);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: 'Failed to delete setting', details: error.message });
+      res.status(500).json({ error: 'No se pudo eliminar el ajuste.', details: error.message });
     }
   });
 
@@ -2641,7 +2702,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error('Error deleting class:', error);
-      res.status(500).json({ error: 'Failed to delete class permanently', details: error.message });
+      res.status(500).json({ error: 'No se pudo eliminar la clase de forma permanente.', details: error.message });
     }
   });
 
@@ -2658,7 +2719,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error('Error updating class:', error);
-      res.status(500).json({ error: 'Failed to update class', details: error.message });
+      res.status(500).json({ error: 'No se pudo actualizar la clase.', details: error.message });
     }
   });
 
@@ -3480,7 +3541,7 @@ async function startServer() {
         res.json({ success: true });
       } else {
         console.log('❌ === PRUEBA DE EMAIL FALLÓ ===');
-        res.json({ success: false, error: 'Failed to send test email - check server logs for details' });
+          res.json({ success: false, error: 'No se pudo enviar el correo de prueba. Revisa los logs del servidor para más detalles.' });
       }
     } catch (error: any) {
       console.error('❌ === ERROR EN PRUEBA DE EMAIL ===');
@@ -3537,7 +3598,7 @@ async function startServer() {
         res.json({ success: true, message: 'Instrucciones enviadas a tu correo' });
       } else {
         console.log('❌ Error al enviar email de restablecimiento');
-        res.json({ success: false, error: 'No se pudo enviar el email de restablecimiento' });
+          res.json({ success: false, error: 'No se pudo enviar el correo de restablecimiento.' });
       }
     } catch (error: any) {
       console.error('❌ === ERROR EN FORGOT-PASSWORD ===');
@@ -3622,7 +3683,7 @@ async function startServer() {
       console.log('Vite middleware initialized');
       app.get('*', (req, res) => {
         if (req.path.startsWith('/api/')) {
-          return res.status(404).json({ error: 'API route not found' });
+      return res.status(404).json({ error: 'La ruta de la API no existe.' });
         }
         return res.sendFile(path.join(__dirname, 'index.html'));
       });
@@ -3630,7 +3691,7 @@ async function startServer() {
       app.use(express.static(path.join(__dirname, 'dist')));
       app.get('*', (req, res) => {
         if (req.path.startsWith('/api/')) {
-          return res.status(404).json({ error: 'API route not found' });
+      return res.status(404).json({ error: 'La ruta de la API no existe.' });
         }
         return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
       });

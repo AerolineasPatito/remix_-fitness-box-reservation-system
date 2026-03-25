@@ -29,6 +29,32 @@ const formatClassDate = (date: string) => {
   const localDate = new Date(`${date}T00:00:00`);
   return localDate.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
 };
+const ICON_PICKER_OPTIONS = [
+  'fa-dumbbell',
+  'fa-bolt',
+  'fa-heartbeat',
+  'fa-fire',
+  'fa-running',
+  'fa-bicycle',
+  'fa-spa',
+  'fa-hand-rock',
+  'fa-stopwatch',
+  'fa-shoe-prints'
+];
+const COLOR_PICKER_OPTIONS = [
+  { value: 'brand', swatch: 'bg-brand' },
+  { value: 'rose', swatch: 'bg-rose-500' },
+  { value: 'amber', swatch: 'bg-amber-500' },
+  { value: 'emerald', swatch: 'bg-emerald-500' },
+  { value: 'indigo', swatch: 'bg-indigo-500' },
+  { value: 'cyan', swatch: 'bg-cyan-500' },
+  { value: 'purple', swatch: 'bg-purple-500' },
+  { value: 'zinc', swatch: 'bg-zinc-800' }
+];
+const getColorSwatchClass = (theme?: string) => {
+  const found = COLOR_PICKER_OPTIONS.find((c) => c.value === theme || c.swatch === theme);
+  return found?.swatch || 'bg-zinc-800';
+};
 
 export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availability, onRefresh, onRefreshStudents }) => {
   const { addNotification, removeNotification } = useNotifications();
@@ -42,15 +68,17 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [yearLoading, setYearLoading] = useState(false);
   const [yearInstances, setYearInstances] = useState<ClassInstance[]>([]);
-  const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string }>>([]);
+  const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string; description?: string; duration?: number }>>([]);
   const [classTypesLoading, setClassTypesLoading] = useState(false);
   const [showTypeManager, setShowTypeManager] = useState(false);
   const [editingClassTypeId, setEditingClassTypeId] = useState<string | null>(null);
   const [classTypeForm, setClassTypeForm] = useState({
     name: '',
     image_url: '',
-    icon: '',
-    color_theme: ''
+    icon: 'fa-dumbbell',
+    color_theme: 'brand',
+    description: '',
+    duration: 60
   });
   
   const datePickerRef = useRef<HTMLInputElement>(null);
@@ -243,9 +271,11 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         name: classTypeForm.name.trim(),
         image_url: classTypeForm.image_url.trim() || null,
         icon: classTypeForm.icon.trim() || null,
-        color_theme: classTypeForm.color_theme.trim() || null
+        color_theme: classTypeForm.color_theme.trim() || null,
+        description: classTypeForm.description.trim() || null,
+        duration: Number(classTypeForm.duration || 60)
       });
-      setClassTypeForm({ name: '', image_url: '', icon: '', color_theme: '' });
+      setClassTypeForm({ name: '', image_url: '', icon: 'fa-dumbbell', color_theme: 'brand', description: '', duration: 60 });
       await fetchClassTypes();
     } catch (err: any) {
       logger.error('Error creating class type', err);
@@ -619,43 +649,133 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 </button>
               </div>
 
-              <form onSubmit={handleCreateClassType} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input
-                  type="text"
-                  required
-                  value={classTypeForm.name}
-                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="Nombre del tipo"
-                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
-                />
-                <input
-                  type="url"
-                  value={classTypeForm.image_url}
-                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, image_url: e.target.value }))}
-                  placeholder="URL de imagen"
-                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
-                />
-                <input
-                  type="text"
-                  value={classTypeForm.icon}
-                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, icon: e.target.value }))}
-                  placeholder="Icono (ej: fa-dumbbell)"
-                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
-                />
-                <input
-                  type="text"
-                  value={classTypeForm.color_theme}
-                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, color_theme: e.target.value }))}
-                  placeholder="Tema de color (ej: amber)"
-                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
-                />
-                <button
-                  type="submit"
-                  className="sm:col-span-2 bg-zinc-900 text-white rounded-xl py-3 text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
-                >
-                  Guardar Tipo
-                </button>
-              </form>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <form onSubmit={handleCreateClassType} className="lg:col-span-2 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      required
+                      value={classTypeForm.name}
+                      onChange={(e) => setClassTypeForm((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="Nombre del tipo"
+                      className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                    />
+                    <input
+                      type="url"
+                      value={classTypeForm.image_url}
+                      onChange={(e) => setClassTypeForm((prev) => ({ ...prev, image_url: e.target.value }))}
+                      placeholder="URL de imagen"
+                      className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Icono</p>
+                    <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
+                      {ICON_PICKER_OPTIONS.map((iconName) => (
+                        <button
+                          key={iconName}
+                          type="button"
+                          onClick={() => setClassTypeForm((prev) => ({ ...prev, icon: iconName }))}
+                          className={`h-10 rounded-lg border flex items-center justify-center transition-all ${
+                            classTypeForm.icon === iconName
+                              ? 'border-brand bg-brand/10 text-brand shadow-md'
+                              : 'border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300'
+                          }`}
+                          title={iconName}
+                        >
+                          <i className={`fas ${iconName}`}></i>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Color</p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {COLOR_PICKER_OPTIONS.map((color) => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          onClick={() => setClassTypeForm((prev) => ({ ...prev, color_theme: color.value }))}
+                          className={`w-8 h-8 rounded-full ${color.swatch} ${
+                            classTypeForm.color_theme === color.value ? 'ring-2 ring-offset-2 ring-zinc-900' : 'ring-1 ring-zinc-200'
+                          } flex items-center justify-center`}
+                          title={color.value}
+                        >
+                          {classTypeForm.color_theme === color.value && <i className="fas fa-check text-[10px] text-white"></i>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={classTypeForm.description}
+                    onChange={(e) => setClassTypeForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder="Descripción de la clase"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm min-h-[80px]"
+                  />
+
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3">
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Duración</label>
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-zinc-200 text-zinc-500 flex items-center justify-center">
+                        <i className="fas fa-clock"></i>
+                      </div>
+                      <input
+                        type="number"
+                        min={15}
+                        value={classTypeForm.duration}
+                        onChange={(e) => setClassTypeForm((prev) => ({ ...prev, duration: Number(e.target.value || 60) }))}
+                        className="ml-3 flex-1 bg-white border border-zinc-200 rounded-lg p-2 text-sm font-semibold"
+                      />
+                      <span className="ml-3 text-xs font-black uppercase tracking-widest text-zinc-500">Minutos</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-zinc-900 text-white rounded-xl py-3 text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
+                  >
+                    Guardar Tipo
+                  </button>
+                </form>
+
+                <div className="bg-zinc-50 border border-zinc-200 rounded-2xl p-4 h-fit">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3">Previsualización</p>
+                  <div className="bg-white border border-zinc-100 rounded-2xl overflow-hidden shadow-sm">
+                    {classTypeForm.image_url ? (
+                      <img
+                        src={classTypeForm.image_url}
+                        alt={classTypeForm.name || 'preview'}
+                        className="w-full h-28 object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-28 bg-zinc-100 flex items-center justify-center text-zinc-400">
+                        <i className="fas fa-image text-2xl"></i>
+                      </div>
+                    )}
+                    <div className="p-4">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className={`w-10 h-10 rounded-xl ${getColorSwatchClass(classTypeForm.color_theme)} text-white flex items-center justify-center`}>
+                          <i className={`fas ${classTypeForm.icon || 'fa-dumbbell'}`}></i>
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-zinc-900 uppercase leading-tight">
+                            {classTypeForm.name || 'Nombre de clase'}
+                          </p>
+                          <p className="text-[10px] uppercase tracking-widest text-zinc-400">
+                            {Number(classTypeForm.duration || 60)} Minutos
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-zinc-500 leading-relaxed">
+                        {classTypeForm.description || 'Descripción de la clase para que el coach visualice el resultado final.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div className="space-y-2 max-h-64 overflow-auto">
                 {classTypes.map((row) => (
@@ -677,23 +797,59 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         />
                         <p className="text-[10px] uppercase tracking-widest text-zinc-400">{row.color_theme || 'default'}</p>
                         {editingClassTypeId === row.id && (
-                          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div className="mt-2 space-y-3">
                             <input
                               value={row.image_url || ''}
                               onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, image_url: e.target.value } : x))}
                               placeholder="URL imagen"
                               className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
                             />
+                            <div>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-zinc-400 mb-1">Icono</p>
+                              <div className="grid grid-cols-5 gap-1">
+                                {ICON_PICKER_OPTIONS.map((iconName) => (
+                                  <button
+                                    key={`${row.id}_${iconName}`}
+                                    type="button"
+                                    onClick={() => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, icon: iconName } : x))}
+                                    className={`h-8 rounded border flex items-center justify-center ${
+                                      (row.icon || 'fa-dumbbell') === iconName
+                                        ? 'border-brand bg-brand/10 text-brand'
+                                        : 'border-zinc-200 bg-white text-zinc-500'
+                                    }`}
+                                  >
+                                    <i className={`fas ${iconName} text-xs`}></i>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-zinc-400 mb-1">Color</p>
+                              <div className="flex flex-wrap gap-2">
+                                {COLOR_PICKER_OPTIONS.map((color) => (
+                                  <button
+                                    key={`${row.id}_${color.value}`}
+                                    type="button"
+                                    onClick={() => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, color_theme: color.value } : x))}
+                                    className={`w-6 h-6 rounded-full ${color.swatch} ${
+                                      (row.color_theme || 'brand') === color.value ? 'ring-2 ring-offset-2 ring-zinc-900' : 'ring-1 ring-zinc-200'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
                             <input
-                              value={row.icon || ''}
-                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, icon: e.target.value } : x))}
-                              placeholder="Icono"
+                              value={row.description || ''}
+                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, description: e.target.value } : x))}
+                              placeholder="Descripción"
                               className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
                             />
                             <input
-                              value={row.color_theme || ''}
-                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, color_theme: e.target.value } : x))}
-                              placeholder="Color"
+                              type="number"
+                              min={15}
+                              value={row.duration || 60}
+                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, duration: Number(e.target.value || 60) } : x))}
+                              placeholder="Duración"
                               className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
                             />
                           </div>

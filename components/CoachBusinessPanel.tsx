@@ -457,14 +457,14 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       <div className="bg-white border-2 border-zinc-50 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 shadow-xl">
         <div className="flex flex-col gap-4 sm:gap-6">
           <div>
-            <h3 className="text-2xl sm:text-4xl font-bebas text-zinc-900 tracking-tighter uppercase italic">Gestion de Paquetes</h3>
-            <p className="text-[9px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.4em]">Inventario, comunidad, gestion y corte de caja</p>
+            <h3 className="text-2xl sm:text-4xl font-bebas text-zinc-900 tracking-tighter uppercase italic">Gestión de Paquetes</h3>
+            <p className="text-[9px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.4em]">Inventario, comunidad, gestión y corte de caja</p>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 bg-zinc-100 p-1 rounded-xl">
             <button onClick={() => setActiveTab('creator')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'creator' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Creador</button>
             <button onClick={() => setActiveTab('community')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'community' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Comunidad</button>
-            <button onClick={() => setActiveTab('management')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'management' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Gestion</button>
+            <button onClick={() => setActiveTab('management')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'management' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Gestión</button>
             <button onClick={() => setActiveTab('cashcut')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'cashcut' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Corte de Caja</button>
           </div>
         </div>
@@ -505,7 +505,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
               </div>
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Detalles y Politicas</label>
-                <textarea className="w-full border border-zinc-200 rounded-xl p-3 text-sm" rows={4} placeholder="Detalles/Politicas: condiciones, reposiciones, cancelaciones..." value={packageForm.detalles} onChange={(e) => setPackageForm((prev) => ({ ...prev, detalles: e.target.value }))} />
+            <textarea className="w-full border border-zinc-200 rounded-xl p-3 text-sm" rows={4} placeholder="Detalles/Políticas: condiciones, reposiciones, cancelaciones..." value={packageForm.detalles} onChange={(e) => setPackageForm((prev) => ({ ...prev, detalles: e.target.value }))} />
               </div>
               <select className="w-full border border-zinc-200 rounded-xl p-3 text-sm" value={packageForm.estado} onChange={(e) => setPackageForm((prev) => ({ ...prev, estado: e.target.value }))}>
                 <option value="active">Activo</option>
@@ -606,7 +606,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       {activeTab === 'management' && (
         <div className="space-y-6">
           <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
-            <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Gestion individual</h4>
+            <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Gestión individual</h4>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-end">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Alumno</label>
@@ -634,7 +634,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 space-y-4">
-              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Seccion 1: Perfil del alumno</h5>
+              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Sección 1: Perfil del alumno</h5>
               <form onSubmit={handleUpdateStudent} className="space-y-4">
                 <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Nombre" value={studentForm.full_name} onChange={(e) => setStudentForm((prev) => ({ ...prev, full_name: e.target.value }))} />
                 <label className="inline-flex items-center gap-2 text-sm">
@@ -646,9 +646,9 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
             </div>
 
             <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 space-y-4">
-              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Seccion 2: Suscripcion actual y beneficiarios</h5>
+              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Sección 2: Suscripción actual y beneficiarios</h5>
               {!selectedActiveSubscription && (
-                <p className="text-sm text-zinc-500">Este alumno no tiene una suscripcion activa.</p>
+                <p className="text-sm text-zinc-500">Este alumno no tiene una suscripción activa.</p>
               )}
 
               {selectedActiveSubscription && (
@@ -672,7 +672,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
               {canManageBeneficiaries && (
                 <div className="space-y-3 border-t border-zinc-100 pt-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Gestion de beneficiarios</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Gestión de beneficiarios</p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <select
                       className="border border-zinc-200 rounded-xl p-3 text-sm md:col-span-2"
@@ -715,7 +715,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
             </div>
 
             <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 space-y-4">
-              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Seccion 3: Operaciones de clase</h5>
+              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Sección 3: Operaciones de clase</h5>
               <form onSubmit={handleRegisterAttendance} className="space-y-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Asistencia / no-show</p>
                 <select
@@ -751,7 +751,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
               </form>
 
               <form onSubmit={handleManualCredits} className="space-y-3 border-t border-zinc-100 pt-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Ajuste manual de creditos</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Ajuste manual de créditos</p>
                 <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Cantidad (+/-)" value={manualCreditsForm.amount} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))} required />
                 <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Motivo" value={manualCreditsForm.reason} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, reason: e.target.value }))} required />
                 <button disabled={!selectedStudentId || loading} className="px-5 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">Aplicar ajuste</button>
@@ -759,7 +759,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
             </div>
 
             <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 space-y-4">
-              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Seccion 4: Nueva venta</h5>
+              <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500">Sección 4: Nueva venta</h5>
               <form onSubmit={handleSellPackage} className="space-y-3">
                 <select className="border border-zinc-200 rounded-xl p-3 text-sm w-full" value={subscriptionForm.paquete_id} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, paquete_id: e.target.value }))} required>
                   <option value="">Selecciona paquete</option>

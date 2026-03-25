@@ -130,7 +130,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <span className="text-brand">{isLogin ? 'ATLETA' : 'EQUIPO'}</span>
           </h2>
           <p className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.5em]">
-            {isLogin ? 'Movement starts here' : 'Elevate your performance'}
+            {isLogin ? 'Tu movimiento inicia aquí' : 'Eleva tu rendimiento'}
           </p>
         </div>
 
@@ -150,7 +150,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
               {showDebug && techDetails && (
                 <div className="bg-zinc-900 p-4 sm:p-6 rounded-xl sm:rounded-2xl overflow-hidden shadow-inner">
-                  <p className="text-[8px] sm:text-[9px] font-mono text-brand mb-2 uppercase tracking-widest">Raw Debug Info:</p>
+                  <p className="text-[8px] sm:text-[9px] font-mono text-brand mb-2 uppercase tracking-widest">Detalle técnico:</p>
                   <pre className="text-[8px] sm:text-[9px] font-mono text-zinc-400 whitespace-pre-wrap break-all leading-relaxed">
                     {JSON.stringify(techDetails, null, 2)}
                   </pre>
@@ -180,7 +180,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             )}
 
             <div className="space-y-2 sm:space-y-3">
-              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Email o Usuario</label>
+              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Correo electrónico o usuario</label>
               <input 
                 required
                 type="text"
@@ -192,7 +192,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             </div>
 
             <div className="space-y-2 sm:space-y-3">
-              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Password Seguro</label>
+              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Contraseña segura</label>
               <input 
                 required
                 type="password"

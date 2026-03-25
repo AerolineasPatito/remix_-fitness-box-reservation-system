@@ -30,6 +30,17 @@ export interface ClassInstance {
   class_type_id?: string;
 }
 
+export interface ClassCategory {
+  id: string;
+  name: string;
+  image_url?: string;
+  icon?: string;
+  color_theme?: string;
+  description?: string;
+  duration?: number;
+  is_active?: number;
+}
+
 // Represents a template for a weekly recurring class session
 export interface ClassSlot {
   id: string;

@@ -76,7 +76,7 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
           <span className="text-[10px] font-black uppercase tracking-[0.2em]">Google Calendar</span>
         </a>
         <button 
-          onClick={() => alert('Descargando pase oficial...')}
+          onClick={() => alert('¡Estamos descargando tu pase oficial...!')}
           className="flex items-center justify-center space-x-4 py-6 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-2xl transition-all shadow-xl shadow-zinc-400/10"
         >
           <i className="fas fa-ticket-alt text-brand text-xl"></i>

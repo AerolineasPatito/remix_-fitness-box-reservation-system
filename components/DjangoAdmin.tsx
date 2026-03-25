@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, logger } from '../lib/api.ts';
 import { EmailConfig } from './EmailConfig.tsx';
-import { HashRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
-import { Profile, ClassInstance } from '../types.ts';
 import { useNotifications } from './NotificationSystem.tsx';
 
-type ModelType = 'profiles' | 'classes' | 'reservations';
+type ModelType = 'profiles' | 'classes' | 'reservations' | 'settings';
 
 export const DjangoAdmin: React.FC = () => {
   const { addNotification } = useNotifications();
@@ -17,6 +16,8 @@ export const DjangoAdmin: React.FC = () => {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [showEmailConfig, setShowEmailConfig] = useState(false);
+  const [cancellationLimitHours, setCancellationLimitHours] = useState('8');
+  const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     fetchStats();
@@ -40,12 +41,13 @@ export const DjangoAdmin: React.FC = () => {
     setError(null);
     try {
       let result: any[] = [];
-      if (currentModel === 'profiles') {
-        result = await api.admin.getProfiles();
-      } else if (currentModel === 'classes') {
-        result = await api.admin.getClasses();
-      } else if (currentModel === 'reservations') {
-        result = await api.admin.getReservations();
+      if (currentModel === 'profiles') result = await api.admin.getProfiles();
+      if (currentModel === 'classes') result = await api.admin.getClasses();
+      if (currentModel === 'reservations') result = await api.admin.getReservations();
+      if (currentModel === 'settings') {
+        result = await api.admin.getSettings();
+        const limitSetting = result.find((row: any) => row.setting_key === 'cancellation_limit_hours');
+        if (limitSetting?.setting_value) setCancellationLimitHours(String(limitSetting.setting_value));
       }
       setData(result);
     } catch (err: any) {
@@ -57,111 +59,47 @@ export const DjangoAdmin: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar este elemento?')) return;
+    if (!confirm('¿Eliminar este elemento?')) return;
     try {
-      if (currentModel === 'profiles') {
-        await api.admin.deleteProfile(id);
-        addNotification({
-          type: 'success',
-          title: 'Usuario Eliminado',
-          message: 'El usuario ha sido eliminado exitosamente del sistema.',
-          duration: 4000
-        });
-      } else if (currentModel === 'classes') {
-        await api.admin.deleteClass(id);
-        addNotification({
-          type: 'success',
-          title: 'Clase Eliminada',
-          message: 'La clase ha sido eliminada exitosamente del sistema.',
-          duration: 4000
-        });
-      } else if (currentModel === 'reservations') {
-        await api.admin.deleteReservation(id);
-        addNotification({
-          type: 'success',
-          title: 'Reserva Eliminada',
-          message: 'La reserva ha sido eliminada exitosamente del sistema.',
-          duration: 4000
-        });
-      }
+      if (currentModel === 'profiles') await api.admin.deleteProfile(id);
+      if (currentModel === 'classes') await api.admin.deleteClass(id);
+      if (currentModel === 'reservations') await api.admin.deleteReservation(id);
+      if (currentModel === 'settings') await api.admin.deleteSetting(id);
+      addNotification({
+        type: 'success',
+        title: 'Eliminado',
+        message: 'Elemento eliminado correctamente.',
+        duration: 3500
+      });
       fetchModelData();
       fetchStats();
     } catch (err: any) {
-      console.error('Delete error:', err);
-      
-      // Handle different error types
-      if (err.message?.includes('USER_HAS_RESERVATIONS')) {
-        const errorData = JSON.parse(err.message);
-        addNotification({
-          type: 'error',
-          title: 'No se puede eliminar usuario',
-          message: errorData.message,
-          details: errorData.details,
-          suggestions: errorData.suggestions,
-          duration: 10000,
-          actions: [
-            {
-              label: 'Ver Reservas',
-              onClick: () => {
-                setCurrentModel('reservations');
-                fetchModelData();
-              },
-              variant: 'primary'
-            }
-          ]
-        });
-      } else if (err.message?.includes('USER_IS_COACH')) {
-        const errorData = JSON.parse(err.message);
-        addNotification({
-          type: 'warning',
-          title: 'Usuario es Coach',
-          message: errorData.message,
-          details: errorData.details,
-          suggestions: errorData.suggestions,
-          duration: 8000
-        });
-      } else {
-        addNotification({
-          type: 'error',
-          title: 'Error de Eliminación',
-          message: 'No se pudo eliminar el elemento. Por favor intenta nuevamente.',
-          details: { technical: err.message },
-          duration: 6000
-        });
-      }
+      let message = 'No se pudo eliminar el elemento.';
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed?.message) message = parsed.message;
+      } catch {}
+      addNotification({
+        type: 'error',
+        title: 'Error de eliminación',
+        message,
+        duration: 6000
+      });
     }
   };
 
   const handlePasswordChange = async (userId: string) => {
     const newPassword = prompt('Ingresa la nueva contraseña:');
     if (!newPassword) return;
-    
     if (newPassword.length < 6) {
-      addNotification({
-        type: 'warning',
-        title: 'Contraseña Inválida',
-        message: 'La contraseña debe tener al menos 6 caracteres.',
-        duration: 4000
-      });
+      addNotification({ type: 'warning', title: 'Contraseña inválida', message: 'Mínimo 6 caracteres.', duration: 3500 });
       return;
     }
-
     try {
       await api.admin.changePassword(userId, newPassword);
-      addNotification({
-        type: 'success',
-        title: 'Contraseña Actualizada',
-        message: 'La contraseña ha sido actualizada exitosamente.',
-        duration: 4000
-      });
+      addNotification({ type: 'success', title: 'Contraseña actualizada', message: 'Cambio aplicado.', duration: 3500 });
     } catch (err: any) {
-      addNotification({
-        type: 'error',
-        title: 'Error al Cambiar Contraseña',
-        message: 'No se pudo actualizar la contraseña. Por favor intenta nuevamente.',
-        details: { technical: err.message },
-        duration: 6000
-      });
+      addNotification({ type: 'error', title: 'Error', message: err.message, duration: 5000 });
     }
   };
 
@@ -169,24 +107,51 @@ export const DjangoAdmin: React.FC = () => {
     e.preventDefault();
     try {
       if (currentModel === 'profiles') {
-        if (isAdding) {
-          await api.admin.createProfile(editingItem);
-        } else {
-          await api.admin.updateProfile(editingItem.id, editingItem);
-        }
+        if (isAdding) await api.admin.createProfile(editingItem);
+        else await api.admin.updateProfile(editingItem.id, editingItem);
       } else if (currentModel === 'classes') {
-        if (isAdding) {
-          await api.addClass(editingItem);
-        } else {
-          await api.admin.updateClass(editingItem.id, editingItem);
-        }
+        if (isAdding) await api.addClass(editingItem);
+        else await api.admin.updateClass(editingItem.id, editingItem);
       }
       setEditingItem(null);
       setIsAdding(false);
       fetchModelData();
       fetchStats();
     } catch (err: any) {
-      alert('Error al guardar: ' + err.message);
+      addNotification({ type: 'error', title: 'Error al guardar', message: err.message, duration: 6000 });
+    }
+  };
+
+  const handleSaveCancellationLimit = async () => {
+    const hours = Number(cancellationLimitHours);
+    if (!Number.isFinite(hours) || hours < 0 || hours > 168) {
+      addNotification({
+        type: 'warning',
+        title: 'Valor inválido',
+        message: 'Ingresa un valor entre 0 y 168 horas.',
+        duration: 4000
+      });
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      await api.admin.updateSetting('cancellation_limit_hours', hours);
+      addNotification({
+        type: 'success',
+        title: 'Ajuste guardado',
+        message: 'Límite de cancelación actualizado.',
+        duration: 3500
+      });
+      fetchModelData();
+    } catch (err: any) {
+      addNotification({
+        type: 'error',
+        title: 'Error guardando ajuste',
+        message: err.message || 'No se pudo actualizar el ajuste.',
+        duration: 6000
+      });
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -194,17 +159,10 @@ export const DjangoAdmin: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8f8f8] font-sans text-[#333]">
-      {/* Django Header */}
       <header className="bg-[#417690] text-white p-3 sm:p-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-md">
-        <div className="flex items-center space-x-3 sm:space-x-4">
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight">Administración de Focus Fitness</h1>
-        </div>
+        <h1 className="text-lg sm:text-xl font-bold tracking-tight">Administración de Focus Fitness</h1>
         <div className="text-[10px] sm:text-xs uppercase font-bold flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
-          <button 
-            onClick={() => setShowEmailConfig(true)}
-            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition-colors"
-            title="Configurar Email"
-          >
+          <button onClick={() => setShowEmailConfig(true)} className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition-colors">
             <i className="fas fa-envelope"></i> Email
           </button>
           <span>Bienvenido, Admin</span>
@@ -213,30 +171,25 @@ export const DjangoAdmin: React.FC = () => {
         </div>
       </header>
 
-      {/* Breadcrumbs */}
       <div className="bg-[#79aec8] text-white px-4 py-2 text-[10px] sm:text-xs font-bold uppercase">
         Inicio › {currentModel.toUpperCase()}
       </div>
 
       <div className="flex flex-col lg:flex-row">
-        {/* Sidebar Navigation */}
-        <nav className="w-full lg:w-48 bg-white border-r border-[#ddd] min-h-[400px]">
+        <nav className="w-full lg:w-56 bg-white border-r border-[#ddd] min-h-[400px]">
           <div className="p-4">
             <h2 className="text-xs font-bold uppercase text-[#666] mb-4">Administrar</h2>
             <ul className="space-y-2">
-              {(['profiles', 'classes', 'reservations'] as ModelType[]).map(model => (
+              {(['profiles', 'classes', 'reservations', 'settings'] as ModelType[]).map((model) => (
                 <li key={model}>
                   <button
                     onClick={() => setCurrentModel(model)}
-                    className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
-                      currentModel === model 
-                        ? 'bg-[#79aec8] text-white' 
-                        : 'text-[#333] hover:bg-[#f0f0f0]'
-                    }`}
+                    className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${currentModel === model ? 'bg-[#79aec8] text-white' : 'text-[#333] hover:bg-[#f0f0f0]'}`}
                   >
-                    {model === 'profiles' && '👥 Usuarios'}
-                    {model === 'classes' && '📅 Clases'}
-                    {model === 'reservations' && '🎫 Reservas'}
+                    {model === 'profiles' && 'Usuarios'}
+                    {model === 'classes' && 'Clases'}
+                    {model === 'reservations' && 'Reservas'}
+                    {model === 'settings' && '⚙️ Ajustes'}
                   </button>
                 </li>
               ))}
@@ -244,9 +197,7 @@ export const DjangoAdmin: React.FC = () => {
           </div>
         </nav>
 
-        {/* Main Content */}
         <main className="flex-1 p-4 sm:p-6">
-          {/* Stats Cards */}
           {stats && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               <div className="bg-white p-4 rounded-lg shadow border border-[#ddd]">
@@ -268,13 +219,54 @@ export const DjangoAdmin: React.FC = () => {
             </div>
           )}
 
-          {/* Content Area */}
           <section className="flex-grow">
-            {editingItem || isAdding ? (
+            {currentModel === 'settings' ? (
+              <div className="bg-white border border-[#eee] shadow-sm p-8 space-y-6">
+                <div>
+                  <h2 className="text-lg font-bold text-[#666] mb-2">Ajustes del Sistema</h2>
+                  <p className="text-xs text-[#666]">Configura políticas globales del negocio.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                  <div>
+                    <label className="block text-xs font-bold text-[#666] uppercase mb-2">
+                      Límite de cancelación (horas)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      value={cancellationLimitHours}
+                      onChange={(e) => setCancellationLimitHours(e.target.value)}
+                      className="w-full border p-2 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveCancellationLimit}
+                    disabled={savingSettings}
+                    className="bg-[#417690] text-white px-6 py-2 text-xs font-bold uppercase rounded hover:bg-[#2b5063] disabled:opacity-60"
+                  >
+                    {savingSettings ? 'Guardando...' : 'Guardar Ajuste'}
+                  </button>
+                </div>
+
+                <div className="border border-[#eee] rounded">
+                  <div className="p-3 bg-[#f7f7f7] text-xs font-bold uppercase text-[#666]">Ajustes actuales</div>
+                  <div className="p-3 space-y-2 text-sm">
+                    {data.length === 0 && <p className="text-[#999]">No hay ajustes configurados.</p>}
+                    {data.map((row: any) => (
+                      <div key={row.setting_key} className="flex items-center justify-between border-b border-[#f0f0f0] pb-2 last:border-b-0 last:pb-0">
+                        <span className="font-mono text-xs">{row.setting_key}</span>
+                        <span className="font-bold">{row.setting_value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : editingItem || isAdding ? (
               <div className="bg-white border border-[#eee] shadow-sm p-8">
-                <h2 className="text-lg font-bold text-[#666] mb-6">
-                  {isAdding ? 'Añadir' : 'Cambiar'} {currentModel.slice(0, -1)}
-                </h2>
+                <h2 className="text-lg font-bold text-[#666] mb-6">{isAdding ? 'Añadir' : 'Cambiar'} {currentModel.slice(0, -1)}</h2>
                 <form onSubmit={handleSave} className="space-y-4">
                   {currentModel === 'profiles' && (
                     <>
@@ -282,41 +274,21 @@ export const DjangoAdmin: React.FC = () => {
                         <>
                           <div>
                             <label className="block text-xs font-bold text-[#666] uppercase mb-1">Email</label>
-                            <input 
-                              className="w-full border p-2 text-sm"
-                              value={editingItem?.email || ''}
-                              onChange={e => setEditingItem({...editingItem, email: e.target.value})}
-                              required
-                            />
+                            <input className="w-full border p-2 text-sm" value={editingItem?.email || ''} onChange={(e) => setEditingItem({ ...editingItem, email: e.target.value })} required />
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-[#666] uppercase mb-1">Password</label>
-                            <input 
-                              type="password"
-                              className="w-full border p-2 text-sm"
-                              value={editingItem?.password || ''}
-                              onChange={e => setEditingItem({...editingItem, password: e.target.value})}
-                              placeholder="focus123"
-                            />
+                            <input type="password" className="w-full border p-2 text-sm" value={editingItem?.password || ''} onChange={(e) => setEditingItem({ ...editingItem, password: e.target.value })} placeholder="focus123" />
                           </div>
                         </>
                       )}
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Nombre Completo</label>
-                        <input 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.full_name || ''}
-                          onChange={e => setEditingItem({...editingItem, full_name: e.target.value})}
-                          required
-                        />
+                        <input className="w-full border p-2 text-sm" value={editingItem?.full_name || ''} onChange={(e) => setEditingItem({ ...editingItem, full_name: e.target.value })} required />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Rol</label>
-                        <select 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem.role}
-                          onChange={e => setEditingItem({...editingItem, role: e.target.value})}
-                        >
+                        <select className="w-full border p-2 text-sm" value={editingItem.role} onChange={(e) => setEditingItem({ ...editingItem, role: e.target.value })}>
                           <option value="student">Student</option>
                           <option value="coach">Coach</option>
                           <option value="admin">Admin</option>
@@ -324,12 +296,7 @@ export const DjangoAdmin: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Créditos</label>
-                        <input 
-                          type="number"
-                          className="w-full border p-2 text-sm"
-                          value={editingItem.credits_remaining}
-                          onChange={e => setEditingItem({...editingItem, credits_remaining: parseInt(e.target.value)})}
-                        />
+                        <input type="number" className="w-full border p-2 text-sm" value={editingItem.credits_remaining} onChange={(e) => setEditingItem({ ...editingItem, credits_remaining: parseInt(e.target.value || '0', 10) })} />
                       </div>
                     </>
                   )}
@@ -338,78 +305,30 @@ export const DjangoAdmin: React.FC = () => {
                     <>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Tipo</label>
-                        <select 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.type || 'CrossFit'}
-                          onChange={e => setEditingItem({...editingItem, type: e.target.value})}
-                        >
-                          <option value="CrossFit">CrossFit</option>
-                          <option value="Weightlifting">Weightlifting</option>
-                          <option value="Gymnastics">Gymnastics</option>
-                          <option value="Endurance">Endurance</option>
-                        </select>
+                        <input className="w-full border p-2 text-sm" value={editingItem?.type || ''} onChange={(e) => setEditingItem({ ...editingItem, type: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Fecha (YYYY-MM-DD)</label>
-                        <input 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.date || ''}
-                          onChange={e => setEditingItem({...editingItem, date: e.target.value})}
-                          placeholder="2024-05-20"
-                        />
+                        <input className="w-full border p-2 text-sm" value={editingItem?.date || ''} onChange={(e) => setEditingItem({ ...editingItem, date: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Inicio (HH:MM)</label>
-                        <input 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.start_time || ''}
-                          onChange={e => setEditingItem({...editingItem, start_time: e.target.value})}
-                          placeholder="07:00"
-                        />
+                        <input className="w-full border p-2 text-sm" value={editingItem?.start_time || ''} onChange={(e) => setEditingItem({ ...editingItem, start_time: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Fin (HH:MM)</label>
-                        <input 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.end_time || ''}
-                          onChange={e => setEditingItem({...editingItem, end_time: e.target.value})}
-                          placeholder="08:00"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-[#666] uppercase mb-1">Estado</label>
-                        <select 
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.status || 'active'}
-                          onChange={e => setEditingItem({...editingItem, status: e.target.value})}
-                        >
-                          <option value="active">Activo</option>
-                          <option value="cancelled">Cancelado</option>
-                          <option value="completed">Completado</option>
-                          <option value="ongoing">En Curso</option>
-                        </select>
+                        <input className="w-full border p-2 text-sm" value={editingItem?.end_time || ''} onChange={(e) => setEditingItem({ ...editingItem, end_time: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Capacidad</label>
-                        <input 
-                          type="number"
-                          className="w-full border p-2 text-sm"
-                          value={editingItem?.capacity || 8}
-                          onChange={e => setEditingItem({...editingItem, capacity: parseInt(e.target.value)})}
-                        />
+                        <input type="number" className="w-full border p-2 text-sm" value={editingItem?.capacity || 8} onChange={(e) => setEditingItem({ ...editingItem, capacity: parseInt(e.target.value || '8', 10) })} />
                       </div>
                     </>
                   )}
 
                   <div className="pt-4 flex space-x-4">
                     <button type="submit" className="bg-[#417690] text-white px-6 py-2 text-xs font-bold uppercase rounded">Grabar</button>
-                    <button 
-                      type="button" 
-                      onClick={() => { setEditingItem(null); setIsAdding(false); }}
-                      className="bg-[#ccc] text-white px-6 py-2 text-xs font-bold uppercase rounded"
-                    >
-                      Cancelar
-                    </button>
+                    <button type="button" onClick={() => { setEditingItem(null); setIsAdding(false); }} className="bg-[#ccc] text-white px-6 py-2 text-xs font-bold uppercase rounded">Cancelar</button>
                   </div>
                 </form>
               </div>
@@ -418,10 +337,10 @@ export const DjangoAdmin: React.FC = () => {
                 <div className="p-4 border-b border-[#eee] flex justify-between items-center">
                   <h2 className="text-lg font-bold text-[#666]">Selecciona {currentModel.slice(0, -1)} para cambiar</h2>
                   {(currentModel === 'classes' || currentModel === 'profiles') && (
-                    <button 
-                      onClick={() => { 
-                        setIsAdding(true); 
-                        if (currentModel === 'classes') setEditingItem({ type: 'CrossFit', capacity: 8 });
+                    <button
+                      onClick={() => {
+                        setIsAdding(true);
+                        if (currentModel === 'classes') setEditingItem({ type: 'Entrenamiento Funcional', capacity: 8 });
                         else setEditingItem({ role: 'student', credits_remaining: 0 });
                       }}
                       className="bg-[#417690] text-white px-4 py-2 text-xs font-bold uppercase rounded hover:bg-[#2b5063]"
@@ -436,93 +355,52 @@ export const DjangoAdmin: React.FC = () => {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="bg-[#f0f0f0] border-b border-[#ddd]">
-                      <th className="p-3 w-8"><input type="checkbox" /></th>
+                      <th className="p-3">ID</th>
                       {currentModel === 'profiles' && (
                         <>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Email</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Nombre</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Rol</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Créditos</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Email Verificado</th>
+                          <th className="p-3">Email</th>
+                          <th className="p-3">Nombre</th>
+                          <th className="p-3">Rol</th>
+                          <th className="p-3">Créditos</th>
                         </>
                       )}
                       {currentModel === 'classes' && (
                         <>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Tipo</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Fecha</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Estado</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Creado Por</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Cancelado Por</th>
+                          <th className="p-3">Tipo</th>
+                          <th className="p-3">Fecha</th>
+                          <th className="p-3">Estado</th>
                         </>
                       )}
                       {currentModel === 'reservations' && (
                         <>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Usuario</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Clase</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Fecha Clase</th>
-                          <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Estado</th>
+                          <th className="p-3">Usuario</th>
+                          <th className="p-3">Clase</th>
+                          <th className="p-3">Fecha Clase</th>
+                          <th className="p-3">Estado</th>
                         </>
                       )}
-                      <th className="p-3 font-bold text-[#417690] uppercase tracking-wider">Acciones</th>
+                      <th className="p-3">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.map((item, idx) => (
-                      <tr key={item.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-[#f9f9f9]'} border-b border-[#eee] hover:bg-[#ffffcc]`}>
-                        <td className="p-3"><input type="checkbox" /></td>
-                        
+                    {data.map((item: any) => (
+                      <tr key={item.id} className="border-b border-[#eee] hover:bg-[#ffffcc]">
+                        <td className="p-3">{item.id}</td>
                         {currentModel === 'profiles' && (
                           <>
-                            <td className="p-3 font-bold text-[#417690] hover:underline cursor-pointer" onClick={() => setEditingItem(item)}>{item.email}</td>
+                            <td className="p-3">{item.email}</td>
                             <td className="p-3">{item.full_name}</td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${item.role === 'coach' ? 'bg-[#e1f5fe] text-[#01579b]' : item.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-[#f5f5f5] text-[#666]'}`}>
-                                {item.role}
-                              </span>
-                            </td>
+                            <td className="p-3">{item.role}</td>
                             <td className="p-3">{item.credits_remaining}</td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${item.email_verified ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                                {item.email_verified ? '✓ Verificado' : '✗ Pendiente'}
-                              </span>
-                            </td>
                           </>
                         )}
-
                         {currentModel === 'classes' && (
                           <>
-                            <td className="p-3 font-bold text-[#417690] hover:underline cursor-pointer" onClick={() => setEditingItem(item)}>{item.type}</td>
+                            <td className="p-3">{item.type}</td>
                             <td className="p-3">{item.date}</td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                item.status === 'active' ? 'bg-green-100 text-green-700' : 
-                                item.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                                item.status === 'completed' ? 'bg-blue-100 text-blue-700' :
-                                item.status === 'ongoing' ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-rose-100 text-rose-700'
-                              }`}>
-                                {item.status === 'active' ? 'Activo' : 
-                                 item.status === 'cancelled' ? 'Cancelado' :
-                                 item.status === 'completed' ? 'Completado' :
-                                 item.status === 'ongoing' ? 'En Curso' :
-                                 item.status}
-                              </span>
-                            </td>
-                            <td className="p-3 text-[10px]">
-                              {item.created_by_email ? 
-                                item.created_by_email : 
-                                (item.created_by || '-')
-                              }
-                            </td>
-                            <td className="p-3 text-[10px]">
-                              {item.canceled_by_email ? 
-                                item.canceled_by_email : 
-                                (item.canceled_by || '-')
-                              }
-                            </td>
+                            <td className="p-3">{item.status}</td>
                           </>
                         )}
-
                         {currentModel === 'reservations' && (
                           <>
                             <td className="p-3">{item.user_email}</td>
@@ -531,7 +409,6 @@ export const DjangoAdmin: React.FC = () => {
                             <td className="p-3">{item.status}</td>
                           </>
                         )}
-
                         <td className="p-3 space-x-2">
                           {(currentModel === 'profiles' || currentModel === 'classes') && (
                             <button onClick={() => setEditingItem(item)} className="text-blue-600 hover:underline">Editar</button>
@@ -542,7 +419,12 @@ export const DjangoAdmin: React.FC = () => {
                               <button onClick={() => handlePasswordChange(item.id)} className="text-purple-600 hover:underline">Cambiar Contraseña</button>
                             </>
                           )}
-                          <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:underline">Eliminar</button>
+                          {currentModel !== 'settings' && (
+                            <>
+                              <span>|</span>
+                              <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:underline">Eliminar</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -558,7 +440,6 @@ export const DjangoAdmin: React.FC = () => {
         </main>
       </div>
 
-      {/* Email Config Modal */}
       {showEmailConfig && (
         <div className="fixed inset-0 z-[999]">
           <EmailConfig />

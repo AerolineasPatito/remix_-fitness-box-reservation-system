@@ -45,6 +45,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string }>>([]);
   const [classTypesLoading, setClassTypesLoading] = useState(false);
   const [showTypeManager, setShowTypeManager] = useState(false);
+  const [editingClassTypeId, setEditingClassTypeId] = useState<string | null>(null);
   const [classTypeForm, setClassTypeForm] = useState({
     name: '',
     image_url: '',
@@ -251,6 +252,30 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     }
   };
 
+  const handleUpdateClassType = async (id: string) => {
+    const row = classTypes.find((t) => t.id === id);
+    if (!row) return;
+    try {
+      await api.updateClassType(id, row);
+      setEditingClassTypeId(null);
+      await fetchClassTypes();
+    } catch (err: any) {
+      logger.error('Error updating class type', err);
+    }
+  };
+
+  const handleDeleteClassType = async (id: string) => {
+    try {
+      await api.deleteClassType(id);
+      if (formData.classTypeId === id) {
+        setFormData((prev) => ({ ...prev, classTypeId: '' }));
+      }
+      await fetchClassTypes();
+    } catch (err: any) {
+      logger.error('Error deleting class type', err);
+    }
+  };
+
   const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -453,8 +478,14 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     if (!deletingId) return;
     try {
       await api.cancelClass(deletingId, user.id);
+      const removedId = deletingId;
       setDeletingId(null);
       onRefresh();
+      setYearInstances((prev) => prev.filter((inst) => inst.id !== removedId));
+      if (selectedYear) {
+        const data = await api.getClasses(selectedYear);
+        setYearInstances(normalizeInstances(data || []));
+      }
       
       addNotification({
         type: 'success',
@@ -476,7 +507,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const updateCredits = async (studentId: string, currentCredits: number, amount: number) => {
     setUpdatingStudentId(`${studentId}_${amount}`);
     try {
-      await api.updateCredits(studentId, currentCredits + amount);
+      await api.coach.adjustStudentCredits(studentId, { amount, reason: 'Ajuste manual' });
       onRefreshStudents();
       fetchStudents();
     } catch (err) {
@@ -638,9 +669,62 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         </div>
                       )}
                       <div>
-                        <p className="text-sm font-bold text-zinc-900">{row.name}</p>
+                        <input
+                          value={row.name}
+                          disabled={editingClassTypeId !== row.id}
+                          onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, name: e.target.value } : x))}
+                          className={`text-sm font-bold rounded px-2 py-1 ${editingClassTypeId === row.id ? 'bg-zinc-50 border border-zinc-200' : 'bg-transparent'}`}
+                        />
                         <p className="text-[10px] uppercase tracking-widest text-zinc-400">{row.color_theme || 'default'}</p>
+                        {editingClassTypeId === row.id && (
+                          <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <input
+                              value={row.image_url || ''}
+                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, image_url: e.target.value } : x))}
+                              placeholder="URL imagen"
+                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
+                            />
+                            <input
+                              value={row.icon || ''}
+                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, icon: e.target.value } : x))}
+                              placeholder="Icono"
+                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
+                            />
+                            <input
+                              value={row.color_theme || ''}
+                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, color_theme: e.target.value } : x))}
+                              placeholder="Color"
+                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
+                            />
+                          </div>
+                        )}
                       </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {editingClassTypeId === row.id ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateClassType(row.id)}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-brand text-white"
+                        >
+                          Guardar
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingClassTypeId(row.id)}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                        >
+                          Editar
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteClassType(row.id)}
+                        className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-rose-50 text-rose-600"
+                      >
+                        Eliminar
+                      </button>
                     </div>
                   </div>
                 ))}

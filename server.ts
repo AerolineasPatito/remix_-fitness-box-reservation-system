@@ -259,6 +259,12 @@ async function startServer() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS system_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_suscripciones_alumno_estado ON suscripciones_alumno(alumno_id, estado);
       CREATE INDEX IF NOT EXISTS idx_suscripciones_vencimiento ON suscripciones_alumno(fecha_vencimiento);
       CREATE INDEX IF NOT EXISTS idx_beneficiarios_suscripcion ON suscripcion_beneficiarios(suscripcion_id, alumno_id);
@@ -284,6 +290,28 @@ async function startServer() {
       `);
       defaults.forEach((row) => insertType.run(createId('ctype_'), row.name, row.image_url, row.icon, row.color_theme));
     }
+
+    const existingCancellationSetting = db.prepare(`
+      SELECT setting_key
+      FROM system_settings
+      WHERE setting_key = 'cancellation_limit_hours'
+    `).get();
+    if (!existingCancellationSetting) {
+      db.prepare(`
+        INSERT INTO system_settings (setting_key, setting_value, updated_at)
+        VALUES ('cancellation_limit_hours', '8', CURRENT_TIMESTAMP)
+      `).run();
+    }
+
+    const getCancellationLimitHours = () => {
+      const row = db.prepare(`
+        SELECT setting_value
+        FROM system_settings
+        WHERE setting_key = 'cancellation_limit_hours'
+      `).get() as { setting_value: string } | undefined;
+      const parsed = Number(row?.setting_value || 8);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+    };
 
     addColumnIfMissing('suscripciones_alumno', 'congelado', 'INTEGER DEFAULT 0');
     addColumnIfMissing('suscripciones_alumno', 'freeze_iniciado_en', 'DATETIME');
@@ -791,6 +819,82 @@ async function startServer() {
       res.json(profile);
     } else {
       res.status(404).json({ error: 'Profile not found' });
+    }
+  });
+
+  app.get('/api/students/:id/dashboard', (req, res) => {
+    try {
+      refreshSubscriptions();
+      const studentId = req.params.id;
+
+      const profile = db.prepare(`
+        SELECT id, email, full_name, role, credits_remaining, total_attended
+        FROM profiles
+        WHERE id = ?
+          AND deleted_at IS NULL
+      `).get(studentId);
+
+      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+      const activeSubscription = db.prepare(`
+        SELECT s.*, p.nombre as package_name, p.capacidad as package_capacity
+        FROM suscripciones_alumno s
+        LEFT JOIN paquetes p ON p.id = s.paquete_id
+        WHERE s.deleted_at IS NULL
+          AND s.estado = 'active'
+          AND EXISTS (
+            SELECT 1
+            FROM suscripcion_beneficiarios sb
+            WHERE sb.suscripcion_id = s.id
+              AND sb.alumno_id = ?
+              AND sb.deleted_at IS NULL
+          )
+        ORDER BY datetime(s.fecha_vencimiento) ASC
+        LIMIT 1
+      `).get(studentId);
+
+      const beneficiaries = activeSubscription
+        ? db.prepare(`
+            SELECT sb.alumno_id, sb.es_titular, p.full_name
+            FROM suscripcion_beneficiarios sb
+            JOIN profiles p ON p.id = sb.alumno_id
+            WHERE sb.suscripcion_id = ?
+              AND sb.deleted_at IS NULL
+            ORDER BY sb.es_titular DESC, datetime(sb.created_at) ASC
+          `).all((activeSubscription as any).id)
+        : [];
+
+      const upcomingReservations = db.prepare(`
+        SELECT
+          r.id,
+          r.status,
+          c.id as class_id,
+          c.type,
+          c.date,
+          c.start_time,
+          c.end_time,
+          ct.image_url,
+          ct.icon,
+          ct.color_theme
+        FROM reservations r
+        JOIN classes c ON c.id = r.class_id
+        LEFT JOIN class_types ct ON ct.id = c.class_type_id
+        WHERE r.user_id = ?
+          AND r.status = 'active'
+          AND r.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND datetime(c.date || ' ' || c.start_time) >= datetime('now')
+        ORDER BY datetime(c.date || ' ' || c.start_time) ASC
+      `).all(studentId);
+
+      res.json({
+        profile,
+        activeSubscription,
+        beneficiaries,
+        upcomingReservations
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to fetch dashboard', details: error.message });
     }
   });
 
@@ -2147,6 +2251,7 @@ async function startServer() {
   app.delete('/api/reservations/:id', (req, res) => {
     try {
       const reservationId = req.params.id;
+      const cancellationLimitHours = getCancellationLimitHours();
 
       const tx = db.transaction(() => {
         const reservation = db.prepare(`
@@ -2161,6 +2266,11 @@ async function startServer() {
           throw new Error('RESERVATION_NOT_FOUND');
         }
 
+        const classStart = new Date(`${reservation.date}T${String(reservation.start_time || '00:00').slice(0, 5)}:00`);
+        const now = new Date();
+        const hoursUntilClass = (classStart.getTime() - now.getTime()) / (1000 * 60 * 60);
+        const isEarlyCancellation = hoursUntilClass >= cancellationLimitHours;
+
         db.prepare(`
           UPDATE reservations
           SET status = 'cancelled',
@@ -2169,8 +2279,8 @@ async function startServer() {
           WHERE id = ?
         `).run(reservationId);
 
-        // Solo devuelve crédito si la reserva estaba activa (no asistida/no_show).
-        if (reservation.status === 'active' && reservation.beneficiario_id && reservation.suscripcion_id) {
+        // Solo devuelve crédito si la reserva estaba activa y fue cancelación temprana.
+        if (isEarlyCancellation && reservation.status === 'active' && reservation.beneficiario_id && reservation.suscripcion_id) {
           db.prepare(`
             UPDATE suscripcion_beneficiarios
             SET clases_restantes = clases_restantes + 1,
@@ -2212,10 +2322,21 @@ async function startServer() {
 
           syncStudentCredits(reservation.user_id);
         }
+
+        return {
+          isEarlyCancellation,
+          cancellationLimitHours
+        };
       });
 
-      tx();
-      res.json({ success: true });
+      const result = tx();
+      res.json({
+        success: true,
+        cancellationPolicy: {
+          limitHours: result.cancellationLimitHours,
+          returnedCredit: result.isEarlyCancellation
+        }
+      });
     } catch (error: any) {
       if (error.message === 'RESERVATION_NOT_FOUND') {
         return res.status(404).json({ error: 'Reserva no encontrada' });
@@ -2233,6 +2354,15 @@ async function startServer() {
       res.json(rows);
     } catch (error: any) {
       res.status(500).json({ error: 'Failed to fetch class types', details: error.message });
+    }
+  });
+
+  app.get('/api/system-settings/public', (req, res) => {
+    try {
+      const cancellationLimit = getCancellationLimitHours();
+      res.json({ cancellation_limit_hours: cancellationLimit });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to fetch public settings', details: error.message });
     }
   });
 
@@ -2413,6 +2543,74 @@ async function startServer() {
       totalReservations: reservationCount.count,
       totalCredits: totalCredits.total || 0
     });
+  });
+
+  app.get('/api/admin/settings', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT setting_key, setting_value, updated_at
+        FROM system_settings
+        ORDER BY setting_key ASC
+      `).all();
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to fetch settings', details: error.message });
+    }
+  });
+
+  app.post('/api/admin/settings', (req, res) => {
+    try {
+      const { setting_key, setting_value } = req.body;
+      if (!setting_key || setting_value == null) {
+        return res.status(400).json({ error: 'setting_key and setting_value are required' });
+      }
+      db.prepare(`
+        INSERT INTO system_settings (setting_key, setting_value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+      `).run(String(setting_key), String(setting_value));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to create setting', details: error.message });
+    }
+  });
+
+  app.put('/api/admin/settings/:key', (req, res) => {
+    try {
+      const key = req.params.key;
+      const { setting_value } = req.body;
+      if (setting_value == null || String(setting_value).trim() === '') {
+        return res.status(400).json({ error: 'setting_value is required' });
+      }
+
+      db.prepare(`
+        INSERT INTO system_settings (setting_key, setting_value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(setting_key)
+        DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
+      `).run(key, String(setting_value));
+
+      const row = db.prepare(`
+        SELECT setting_key, setting_value, updated_at
+        FROM system_settings
+        WHERE setting_key = ?
+      `).get(key);
+      res.json({ success: true, setting: row });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to update setting', details: error.message });
+    }
+  });
+
+  app.delete('/api/admin/settings/:key', (req, res) => {
+    try {
+      const key = req.params.key;
+      if (key === 'cancellation_limit_hours') {
+        return res.status(400).json({ error: 'Cannot delete required setting cancellation_limit_hours' });
+      }
+      db.prepare(`DELETE FROM system_settings WHERE setting_key = ?`).run(key);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to delete setting', details: error.message });
+    }
   });
 
   // Admin CRUD for Classes

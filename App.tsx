@@ -145,7 +145,7 @@ const App: React.FC = () => {
             <Route path="/" element={<ServiceSelector />} />
             <Route path="/schedule/:serviceType" element={
               <div className="container mx-auto px-4 py-12 lg:py-20">
-                <Schedule instances={instances} availability={availability} />
+                <Schedule instances={instances} availability={availability} user={userProfile} />
               </div>
             } />
             <Route path="/book/:instanceId" element={

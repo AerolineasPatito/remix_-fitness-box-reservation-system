@@ -103,6 +103,20 @@ export const api = {
     });
     return handleResponse(res);
   },
+  cancelReservation: async (reservationId: string) => {
+    const res = await fetch(`/api/reservations/${reservationId}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(res);
+  },
+  getStudentDashboard: async (studentId: string) => {
+    const res = await fetch(`/api/students/${studentId}/dashboard`);
+    return handleResponse(res);
+  },
+  getPublicSettings: async () => {
+    const res = await fetch('/api/system-settings/public');
+    return handleResponse(res);
+  },
   getStudents: async () => {
     const res = await fetch('/api/students');
     return handleResponse(res);
@@ -298,6 +312,32 @@ export const api = {
     },
     getStats: async () => {
       const res = await fetch('/api/admin/stats');
+      return handleResponse(res);
+    },
+    getSettings: async () => {
+      const res = await fetch('/api/admin/settings');
+      return handleResponse(res);
+    },
+    createSetting: async (data: { setting_key: string; setting_value: string }) => {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return handleResponse(res);
+    },
+    updateSetting: async (key: string, value: string | number) => {
+      const res = await fetch(`/api/admin/settings/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ setting_value: String(value) })
+      });
+      return handleResponse(res);
+    },
+    deleteSetting: async (key: string) => {
+      const res = await fetch(`/api/admin/settings/${encodeURIComponent(key)}`, {
+        method: 'DELETE'
+      });
       return handleResponse(res);
     },
     getCoachAnalytics: async () => {

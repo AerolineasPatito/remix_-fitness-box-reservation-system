@@ -1098,6 +1098,44 @@ async function startServer() {
       });
 
       const reservationId = transaction();
+
+      const reservationDetails = db.prepare(`
+        SELECT
+          p.email,
+          p.full_name,
+          c.type as class_name,
+          c.date as class_date,
+          c.start_time,
+          c.end_time
+        FROM reservations r
+        JOIN profiles p ON p.id = r.user_id
+        JOIN classes c ON c.id = r.class_id
+        WHERE r.id = ?
+      `).get(reservationId) as {
+        email?: string;
+        full_name?: string;
+        class_name?: string;
+        class_date?: string;
+        start_time?: string;
+        end_time?: string;
+      } | undefined;
+
+      if (reservationDetails?.email && reservationDetails?.class_name && reservationDetails?.class_date) {
+        emailService.sendReservationConfirmation(reservationDetails.email, {
+          fullName: reservationDetails.full_name,
+          className: reservationDetails.class_name,
+          classDate: reservationDetails.class_date,
+          startTime: String(reservationDetails.start_time || '').slice(0, 5),
+          endTime: String(reservationDetails.end_time || '').slice(0, 5),
+          ticketId: reservationId
+        }).then((sent) => {
+          if (!sent) {
+            console.warn('No se pudo enviar el correo de confirmación de reserva.');
+          }
+        }).catch((mailError) => {
+          console.error('Error enviando correo de confirmación de reserva:', mailError);
+        });
+      }
       res.json({ success: true, id: reservationId, message: 'Reserva creada y crédito descontado correctamente.' });
 
     } catch (error: any) {

@@ -33,6 +33,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         if (data.error) throw new Error(data.error);
         localStorage.setItem('focus_session', JSON.stringify(data.session));
         onLogin(data.session);
+        window.location.replace('/');
       } else {
         const data = await api.register(email, password, fullName);
         if (data.error) throw new Error(data.error);
@@ -46,6 +47,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         // Si no requiere verificación (flujo antiguo), continuar normalmente
         localStorage.setItem('focus_session', JSON.stringify(data.session));
         onLogin(data.session);
+        window.location.replace('/');
       }
     } catch (err: any) {
       setError(err.message || 'Ocurrió un error inesperado');

@@ -233,6 +233,58 @@ class EmailService {
       html
     });
   }
+
+  async sendReservationConfirmation(
+    email: string,
+    reservationDetails: {
+      fullName?: string;
+      className: string;
+      classDate: string;
+      startTime: string;
+      endTime: string;
+      ticketId: string;
+    }
+  ): Promise<boolean> {
+    const formattedDate = new Date(`${reservationDetails.classDate}T00:00:00`).toLocaleDateString('es-MX', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+
+    const html = `
+      <div style="font-family: 'Arial', sans-serif; max-width: 640px; margin: 0 auto; background: #f5f7fb; padding: 24px;">
+        <div style="background: linear-gradient(135deg, #111827 0%, #0f172a 100%); border-radius: 20px 20px 0 0; padding: 36px; text-align: center;">
+          <h1 style="color: #22d3ee; margin: 0; font-size: 32px; letter-spacing: 1px;">FOCUS FITNESS</h1>
+          <p style="color: #ffffff; margin: 12px 0 0 0; font-size: 14px; letter-spacing: .12em; text-transform: uppercase;">Confirmación de reserva</p>
+        </div>
+        <div style="background: #ffffff; border-radius: 0 0 20px 20px; padding: 32px; border: 1px solid #e5e7eb;">
+          <p style="font-size: 16px; color: #111827; margin-top: 0;">
+            ¡Hola${reservationDetails.fullName ? `, ${reservationDetails.fullName}` : ''}!
+          </p>
+          <p style="font-size: 14px; color: #6b7280; line-height: 1.7;">
+            Tu reserva quedó confirmada. Aquí está tu ticket digital para la próxima sesión.
+          </p>
+          <div style="background: #0f172a; border-radius: 16px; padding: 20px; margin: 24px 0;">
+            <p style="margin: 0 0 14px 0; color: #22d3ee; font-weight: bold; text-transform: uppercase; letter-spacing: .1em; font-size: 11px;">Ticket</p>
+            <p style="margin: 0 0 8px 0; color: #fff; font-size: 22px; font-weight: 700;">${reservationDetails.className}</p>
+            <p style="margin: 0; color: #cbd5e1; font-size: 14px;">${formattedDate}</p>
+            <p style="margin: 8px 0 0 0; color: #cbd5e1; font-size: 14px;">${reservationDetails.startTime} - ${reservationDetails.endTime}</p>
+            <p style="margin: 16px 0 0 0; color: #f8fafc; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;">ID Ticket: ${reservationDetails.ticketId}</p>
+          </div>
+          <p style="font-size: 13px; color: #6b7280; margin-bottom: 0;">
+            Te recomendamos llegar 10 minutos antes para iniciar puntual.
+          </p>
+        </div>
+      </div>
+    `;
+
+    return this.sendEmail({
+      to: email,
+      subject: '✅ Reserva confirmada - Focus Fitness',
+      html
+    });
+  }
 }
 
 export { EmailService };

@@ -1,12 +1,16 @@
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import html2canvas from 'html2canvas';
 
 interface ConfirmationProps {
   booking: any;
 }
 
 export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
+  const ticketRef = useRef<HTMLDivElement>(null);
+  const [downloadingTicket, setDownloadingTicket] = useState(false);
+
   if (!booking) return (
     <div className="text-center py-20 text-zinc-400 uppercase font-black tracking-widest">
       No se encontró información.
@@ -17,6 +21,27 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
     const start = `${booking.fecha.replace(/-/g, '')}T${booking.horaInicio.replace(':', '')}00Z`;
     const end = `${booking.fecha.replace(/-/g, '')}T${booking.horaFin.replace(':', '')}00Z`;
     return `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(booking.tipoClase)}&dates=${start}/${end}&details=${encodeURIComponent('Reserva en Focus Fitness. ID: ' + booking.id)}&location=Focus%20Fitness%20Studio`;
+  };
+
+  const handleDownloadTicket = async () => {
+    if (!ticketRef.current || !booking?.id) return;
+    setDownloadingTicket(true);
+    try {
+      const canvas = await html2canvas(ticketRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true
+      });
+      const imageData = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = imageData;
+      link.download = `focus-ticket-${booking.id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      setDownloadingTicket(false);
+    }
   };
 
   return (
@@ -37,7 +62,7 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
         </p>
       </div>
 
-      <div className="bg-zinc-50 border border-zinc-100 p-12 rounded-[3.5rem] text-left">
+      <div ref={ticketRef} className="bg-zinc-50 border border-zinc-100 p-12 rounded-[3.5rem] text-left">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12 border-b border-zinc-200 pb-12">
           <div className="space-y-2">
             <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Entrenamiento</span>
@@ -76,11 +101,14 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
           <span className="text-[10px] font-black uppercase tracking-[0.2em]">Google Calendar</span>
         </a>
         <button 
-          onClick={() => alert('¡Estamos descargando tu pase oficial...!')}
+          onClick={handleDownloadTicket}
+          disabled={downloadingTicket}
           className="flex items-center justify-center space-x-4 py-6 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-2xl transition-all shadow-xl shadow-zinc-400/10"
         >
           <i className="fas fa-ticket-alt text-brand text-xl"></i>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em]">Descargar Ticket</span>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em]">
+            {downloadingTicket ? 'Generando ticket...' : 'Descargar Ticket'}
+          </span>
         </button>
       </div>
 

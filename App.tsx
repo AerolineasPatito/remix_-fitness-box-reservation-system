@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [instances, setInstances] = useState<ClassInstance[]>([]);
   const [availability, setAvailability] = useState<AvailabilityState>({});
   const [lastBooking, setLastBooking] = useState<any>(null);
+  const [studentDashboard, setStudentDashboard] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -63,6 +64,12 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
     }
   }, [session]);
+
+  useEffect(() => {
+    if (userProfile?.role === 'student' && userProfile?.id) {
+      fetchStudentDashboard(userProfile.id);
+    }
+  }, [userProfile?.id, userProfile?.role]);
 
   const fetchProfile = async (userId: string) => {
     console.log('Fetching profile for:', userId);
@@ -111,6 +118,17 @@ const App: React.FC = () => {
     localStorage.removeItem('focus_session');
     setSession(null);
     setUserProfile(null);
+    window.location.href = '/';
+  };
+
+  const fetchStudentDashboard = async (userId: string) => {
+    try {
+      const data = await api.getStudentDashboard(userId);
+      setStudentDashboard(data);
+    } catch (err) {
+      logger.error('Error fetching student dashboard', err);
+      setStudentDashboard(null);
+    }
   };
 
 
@@ -142,7 +160,54 @@ const App: React.FC = () => {
           
           <main className="flex-grow">
           <Routes>
-            <Route path="/" element={<ServiceSelector />} />
+            <Route path="/" element={
+              <div className="space-y-6">
+                {userProfile.role === 'student' && (
+                  <div className="container mx-auto px-4 pt-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                      <div className="lg:col-span-2 rounded-3xl border border-zinc-200 bg-white/70 backdrop-blur-md p-6 shadow-xl">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Dashboard</p>
+                        <h2 className="mt-2 text-4xl font-bebas text-zinc-900 uppercase italic tracking-tight">
+                          ¡Hola, {userProfile.full_name.split(' ')[0]}!
+                        </h2>
+                        <p className="mt-3 text-sm text-zinc-500">Tu progreso y tus reservas en un solo lugar.</p>
+                      </div>
+                      <div className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-zinc-900 to-zinc-800 p-6 text-white shadow-xl">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Créditos disponibles</p>
+                        <p className="mt-2 text-4xl font-bebas">{userProfile.credits_remaining}</p>
+                      </div>
+                      <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-xl">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Paquete activo</p>
+                        <p className="mt-2 text-lg font-black text-zinc-900">
+                          {studentDashboard?.activeSubscription?.package_name || 'Sin paquete activo'}
+                        </p>
+                        <p className="mt-2 text-xs text-zinc-500">
+                          {studentDashboard?.activeSubscription?.fecha_vencimiento
+                            ? `Vence: ${new Date(studentDashboard.activeSubscription.fecha_vencimiento).toLocaleDateString('es-MX')}`
+                            : 'Renueva con tu coach para seguir entrenando.'}
+                        </p>
+                      </div>
+                      <div className="lg:col-span-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-xl">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-400">Próxima clase</p>
+                        {studentDashboard?.upcomingReservations?.length ? (
+                          <div className="mt-2">
+                            <p className="text-lg font-black text-zinc-900">{studentDashboard.upcomingReservations[0].type}</p>
+                            <p className="text-sm text-zinc-500">
+                              {new Date(`${studentDashboard.upcomingReservations[0].date}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {' · '}
+                              {String(studentDashboard.upcomingReservations[0].start_time || '').slice(0, 5)}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-sm text-zinc-500">Aún no tienes una reserva próxima.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <ServiceSelector />
+              </div>
+            } />
             <Route path="/schedule/:serviceType" element={
               <div className="container mx-auto px-4 py-12 lg:py-20">
                 <Schedule

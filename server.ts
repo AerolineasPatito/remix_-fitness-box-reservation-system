@@ -67,6 +67,7 @@ async function startServer() {
       CREATE TABLE IF NOT EXISTS classes (
         id TEXT PRIMARY KEY,
         type TEXT,
+        class_type_id TEXT,
         date TEXT,
         start_time TEXT,
         end_time TEXT,
@@ -77,19 +78,24 @@ async function startServer() {
         canceled_by TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        deleted_at DATETIME
+        deleted_at DATETIME,
+        FOREIGN KEY(class_type_id) REFERENCES class_types(id)
       );
 
       CREATE TABLE IF NOT EXISTS reservations (
         id TEXT PRIMARY KEY,
         user_id TEXT,
         class_id TEXT,
+        suscripcion_id TEXT,
+        beneficiario_id TEXT,
         status TEXT DEFAULT 'active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         deleted_at DATETIME,
         FOREIGN KEY(user_id) REFERENCES profiles(id),
-        FOREIGN KEY(class_id) REFERENCES classes(id)
+        FOREIGN KEY(class_id) REFERENCES classes(id),
+        FOREIGN KEY(suscripcion_id) REFERENCES suscripciones_alumno(id),
+        FOREIGN KEY(beneficiario_id) REFERENCES suscripcion_beneficiarios(id)
       );
     `);
     console.log('Database initialized');
@@ -124,6 +130,7 @@ async function startServer() {
     addColumnIfMissing('classes', 'created_by', 'TEXT');
     addColumnIfMissing('classes', 'updated_by', 'TEXT');
     addColumnIfMissing('classes', 'canceled_by', 'TEXT');
+    addColumnIfMissing('classes', 'class_type_id', 'TEXT');
     addColumnIfMissing('classes', 'real_time_status', "TEXT DEFAULT 'scheduled'");
     addColumnIfMissing('classes', 'created_at', 'DATETIME');
     addColumnIfMissing('classes', 'updated_at', 'DATETIME');
@@ -133,6 +140,8 @@ async function startServer() {
     addColumnIfMissing('reservations', 'created_at', 'DATETIME');
     addColumnIfMissing('reservations', 'updated_at', 'DATETIME');
     addColumnIfMissing('reservations', 'deleted_at', 'DATETIME');
+    addColumnIfMissing('reservations', 'suscripcion_id', 'TEXT');
+    addColumnIfMissing('reservations', 'beneficiario_id', 'TEXT');
     db.prepare("UPDATE reservations SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)").run();
 
     db.exec(`
@@ -239,6 +248,17 @@ async function startServer() {
         FOREIGN KEY(suscripcion_id) REFERENCES suscripciones_alumno(id)
       );
 
+      CREATE TABLE IF NOT EXISTS class_types (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        image_url TEXT,
+        icon TEXT,
+        color_theme TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_suscripciones_alumno_estado ON suscripciones_alumno(alumno_id, estado);
       CREATE INDEX IF NOT EXISTS idx_suscripciones_vencimiento ON suscripciones_alumno(fecha_vencimiento);
       CREATE INDEX IF NOT EXISTS idx_beneficiarios_suscripcion ON suscripcion_beneficiarios(suscripcion_id, alumno_id);
@@ -248,6 +268,22 @@ async function startServer() {
     `);
 
     const createId = (prefix = '') => `${prefix}${Math.random().toString(36).slice(2, 11)}`;
+
+    const classTypesCount = db.prepare(`SELECT COUNT(*) as count FROM class_types`).get() as { count: number };
+    if ((classTypesCount?.count || 0) === 0) {
+      const defaults = [
+        { name: 'Entrenamiento Funcional', image_url: '', icon: 'fa-bolt', color_theme: 'amber' },
+        { name: 'Sculpt and Strength', image_url: '', icon: 'fa-dumbbell', color_theme: 'cyan' },
+        { name: 'HIIT Conditioning', image_url: '', icon: 'fa-heartbeat', color_theme: 'rose' },
+        { name: 'Sculpt Lower Body', image_url: '', icon: 'fa-shoe-prints', color_theme: 'indigo' },
+        { name: 'Full Body', image_url: '', icon: 'fa-user-check', color_theme: 'emerald' }
+      ];
+      const insertType = db.prepare(`
+        INSERT INTO class_types (id, name, image_url, icon, color_theme, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `);
+      defaults.forEach((row) => insertType.run(createId('ctype_'), row.name, row.image_url, row.icon, row.color_theme));
+    }
 
     addColumnIfMissing('suscripciones_alumno', 'congelado', 'INTEGER DEFAULT 0');
     addColumnIfMissing('suscripciones_alumno', 'freeze_iniciado_en', 'DATETIME');
@@ -701,19 +737,31 @@ async function startServer() {
 
       const classes = isValidYear
         ? db.prepare(`
-            SELECT *
-            FROM classes
-            WHERE status = 'active'
-              AND deleted_at IS NULL
-              AND strftime('%Y', date) = ?
-            ORDER BY date ASC, start_time ASC
+            SELECT
+              c.*,
+              COALESCE(ct.name, c.type) as type,
+              ct.image_url as image_url,
+              ct.icon as class_type_icon,
+              ct.color_theme as class_type_color_theme
+            FROM classes c
+            LEFT JOIN class_types ct ON ct.id = c.class_type_id
+            WHERE c.status = 'active'
+              AND c.deleted_at IS NULL
+              AND strftime('%Y', c.date) = ?
+            ORDER BY c.date ASC, c.start_time ASC
           `).all(year)
         : db.prepare(`
-            SELECT *
-            FROM classes
-            WHERE status = 'active'
-              AND deleted_at IS NULL
-            ORDER BY date ASC, start_time ASC
+            SELECT
+              c.*,
+              COALESCE(ct.name, c.type) as type,
+              ct.image_url as image_url,
+              ct.icon as class_type_icon,
+              ct.color_theme as class_type_color_theme
+            FROM classes c
+            LEFT JOIN class_types ct ON ct.id = c.class_type_id
+            WHERE c.status = 'active'
+              AND c.deleted_at IS NULL
+            ORDER BY c.date ASC, c.start_time ASC
           `).all();
 
       res.json(classes);
@@ -820,20 +868,22 @@ async function startServer() {
         }
 
         const userProfile = db.prepare(`
-          SELECT id, credits_remaining
+          SELECT id
           FROM profiles
           WHERE id = ?
             AND role = 'student'
             AND deleted_at IS NULL
-        `).get(userId) as { id: string; credits_remaining: number } | undefined;
+        `).get(userId) as { id: string } | undefined;
 
         if (!userProfile) {
           throw new Error('USER_NOT_FOUND');
         }
 
         const classStartIso = `${classInfo.date} ${classInfo.start_time}`;
-        const eligibleSubscription = db.prepare(`
-          SELECT sb.id
+        const beneficiary = db.prepare(`
+          SELECT
+            sb.id,
+            sb.suscripcion_id
           FROM suscripcion_beneficiarios sb
           JOIN suscripciones_alumno s ON s.id = sb.suscripcion_id
           WHERE sb.alumno_id = ?
@@ -846,23 +896,64 @@ async function startServer() {
             AND datetime(s.fecha_vencimiento) >= datetime(?)
           ORDER BY datetime(s.fecha_vencimiento) ASC
           LIMIT 1
-        `).get(userId, classStartIso) as { id: string } | undefined;
+        `).get(userId, classStartIso) as { id: string; suscripcion_id: string } | undefined;
 
-        if (!eligibleSubscription && (userProfile.credits_remaining || 0) <= 0) {
-          throw new Error('INSUFFICIENT_CREDITS');
+        if (!beneficiary) {
+          throw new Error('INSUFFICIENT_CREDITS_400');
         }
 
         const reservationId = createId('res_');
         db.prepare(`
-          INSERT INTO reservations (id, user_id, class_id, status, created_at, updated_at)
-          VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `).run(reservationId, userId, classId);
+          INSERT INTO reservations (id, user_id, class_id, suscripcion_id, beneficiario_id, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `).run(reservationId, userId, classId, beneficiary.suscripcion_id, beneficiary.id);
+
+        db.prepare(`
+          UPDATE suscripcion_beneficiarios
+          SET clases_restantes = clases_restantes - 1,
+              estado = CASE WHEN (clases_restantes - 1) <= 0 THEN 'depleted' ELSE 'active' END,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(beneficiary.id);
+
+        db.prepare(`
+          UPDATE suscripciones_alumno
+          SET clases_restantes = (
+              SELECT COALESCE(SUM(clases_restantes), 0)
+              FROM suscripcion_beneficiarios
+              WHERE suscripcion_id = suscripciones_alumno.id
+                AND deleted_at IS NULL
+            ),
+            clases_consumidas = MAX(
+              0,
+              clases_totales - (
+                SELECT COALESCE(SUM(clases_restantes), 0)
+                FROM suscripcion_beneficiarios
+                WHERE suscripcion_id = suscripciones_alumno.id
+                  AND deleted_at IS NULL
+              )
+            ),
+            estado = CASE
+              WHEN estado = 'expired' THEN 'expired'
+              WHEN (
+                SELECT COALESCE(SUM(clases_restantes), 0)
+                FROM suscripcion_beneficiarios
+                WHERE suscripcion_id = suscripciones_alumno.id
+                  AND deleted_at IS NULL
+              ) <= 0 THEN 'depleted'
+              ELSE 'active'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(beneficiary.suscripcion_id);
+
+        syncStudentCredits(userId);
 
         return reservationId;
       });
 
       const reservationId = transaction();
-      res.json({ success: true, id: reservationId, message: 'Reserva creada. El descuento se aplicará al registrar asistencia.' });
+      res.json({ success: true, id: reservationId, message: 'Reserva creada y crédito descontado correctamente.' });
 
     } catch (error: any) {
       console.error('Reservation error:', error);
@@ -879,8 +970,10 @@ async function startServer() {
           return res.status(409).json({ error: 'La clase está llena' });
         case 'USER_NOT_FOUND':
           return res.status(404).json({ error: 'Usuario no encontrado' });
+        case 'INSUFFICIENT_CREDITS_400':
+          return res.status(400).json({ error: 'No tienes créditos suficientes' });
         case 'INSUFFICIENT_CREDITS':
-          return res.status(402).json({ error: 'No tienes créditos suficientes' });
+          return res.status(400).json({ error: 'No tienes créditos suficientes' });
         default:
           return res.status(500).json({ error: 'Error al crear la reserva' });
       }
@@ -1603,29 +1696,6 @@ async function startServer() {
           throw new Error('ATTENDANCE_ALREADY_REGISTERED');
         }
 
-        const beneficiary = db.prepare(`
-          SELECT
-            sb.*,
-            s.id as suscripcion_id,
-            s.fecha_vencimiento
-          FROM suscripcion_beneficiarios sb
-          JOIN suscripciones_alumno s ON s.id = sb.suscripcion_id
-          WHERE sb.alumno_id = ?
-            AND sb.deleted_at IS NULL
-            AND s.deleted_at IS NULL
-            AND s.estado = 'active'
-            AND s.congelado = 0
-            AND sb.estado = 'active'
-            AND sb.clases_restantes > 0
-            AND datetime(s.fecha_vencimiento) >= datetime('now')
-          ORDER BY datetime(s.fecha_vencimiento) ASC
-          LIMIT 1
-        `).get(alumno_id) as any;
-
-        if (!beneficiary) {
-          throw new Error('NO_ACTIVE_SUBSCRIPTION');
-        }
-
         const classInfo = db.prepare(`
           SELECT id, date, start_time, end_time, status
           FROM classes
@@ -1656,6 +1726,98 @@ async function startServer() {
           throw new Error('DAILY_LIMIT_REACHED');
         }
 
+        const existingReservation = db.prepare(`
+          SELECT id, suscripcion_id, beneficiario_id
+          FROM reservations
+          WHERE user_id = ?
+            AND class_id = ?
+            AND status = 'active'
+            AND deleted_at IS NULL
+          LIMIT 1
+        `).get(alumno_id, clase_id) as any;
+
+        let beneficiary: any = null;
+        if (existingReservation?.beneficiario_id && existingReservation?.suscripcion_id) {
+          beneficiary = db.prepare(`
+            SELECT
+              sb.*,
+              s.id as suscripcion_id,
+              s.fecha_vencimiento
+            FROM suscripcion_beneficiarios sb
+            JOIN suscripciones_alumno s ON s.id = sb.suscripcion_id
+            WHERE sb.id = ?
+              AND sb.suscripcion_id = ?
+              AND sb.alumno_id = ?
+              AND sb.deleted_at IS NULL
+              AND s.deleted_at IS NULL
+            LIMIT 1
+          `).get(existingReservation.beneficiario_id, existingReservation.suscripcion_id, alumno_id);
+        } else {
+          beneficiary = db.prepare(`
+            SELECT
+              sb.*,
+              s.id as suscripcion_id,
+              s.fecha_vencimiento
+            FROM suscripcion_beneficiarios sb
+            JOIN suscripciones_alumno s ON s.id = sb.suscripcion_id
+            WHERE sb.alumno_id = ?
+              AND sb.deleted_at IS NULL
+              AND s.deleted_at IS NULL
+              AND s.estado = 'active'
+              AND s.congelado = 0
+              AND sb.estado = 'active'
+              AND sb.clases_restantes > 0
+              AND datetime(s.fecha_vencimiento) >= datetime('now')
+            ORDER BY datetime(s.fecha_vencimiento) ASC
+            LIMIT 1
+          `).get(alumno_id);
+
+          if (beneficiary) {
+            db.prepare(`
+              UPDATE suscripcion_beneficiarios
+              SET clases_restantes = clases_restantes - 1,
+                  estado = CASE WHEN (clases_restantes - 1) <= 0 THEN 'depleted' ELSE 'active' END,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(beneficiary.id);
+
+            db.prepare(`
+              UPDATE suscripciones_alumno
+              SET clases_restantes = (
+                  SELECT COALESCE(SUM(clases_restantes), 0)
+                  FROM suscripcion_beneficiarios
+                  WHERE suscripcion_id = suscripciones_alumno.id
+                    AND deleted_at IS NULL
+                ),
+                clases_consumidas = MAX(
+                  0,
+                  clases_totales - (
+                    SELECT COALESCE(SUM(clases_restantes), 0)
+                    FROM suscripcion_beneficiarios
+                    WHERE suscripcion_id = suscripciones_alumno.id
+                      AND deleted_at IS NULL
+                  )
+                ),
+                estado = CASE
+                  WHEN estado = 'expired' THEN 'expired'
+                  WHEN (
+                    SELECT COALESCE(SUM(clases_restantes), 0)
+                    FROM suscripcion_beneficiarios
+                    WHERE suscripcion_id = suscripciones_alumno.id
+                      AND deleted_at IS NULL
+                  ) <= 0 THEN 'depleted'
+                  ELSE 'active'
+                END,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(beneficiary.suscripcion_id);
+          }
+        }
+
+        if (!beneficiary) {
+          throw new Error('NO_ACTIVE_SUBSCRIPTION');
+        }
+
         const classStartDateTime = new Date(`${classInfo.date}T${classInfo.start_time || '00:00:00'}`);
         const subscriptionExpiryDate = new Date(beneficiary.fecha_vencimiento);
         if (classStartDateTime.getTime() > subscriptionExpiryDate.getTime()) {
@@ -1663,57 +1825,18 @@ async function startServer() {
         }
 
         db.prepare(`
-          UPDATE suscripcion_beneficiarios
-          SET clases_restantes = clases_restantes - 1,
-              estado = CASE WHEN (clases_restantes - 1) <= 0 THEN 'depleted' ELSE 'active' END,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).run(beneficiary.id);
-
-        db.prepare(`
-          UPDATE suscripciones_alumno
-          SET clases_restantes = (
-              SELECT COALESCE(SUM(clases_restantes), 0)
-              FROM suscripcion_beneficiarios
-              WHERE suscripcion_id = suscripciones_alumno.id
-                AND deleted_at IS NULL
-            ),
-            clases_consumidas = MAX(
-              0,
-              clases_totales - (
-                SELECT COALESCE(SUM(clases_restantes), 0)
-                FROM suscripcion_beneficiarios
-                WHERE suscripcion_id = suscripciones_alumno.id
-                  AND deleted_at IS NULL
-              )
-            ),
-            estado = CASE
-              WHEN estado = 'expired' THEN 'expired'
-              WHEN (
-                SELECT COALESCE(SUM(clases_restantes), 0)
-                FROM suscripcion_beneficiarios
-                WHERE suscripcion_id = suscripciones_alumno.id
-                  AND deleted_at IS NULL
-              ) <= 0 THEN 'depleted'
-              ELSE 'active'
-            END,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).run(beneficiary.suscripcion_id);
-
-        db.prepare(`
           INSERT INTO registros_asistencia (
             id, alumno_id, clase_id, suscripcion_id, estado, asistio_en, registrado_por, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `).run(createId('att_'), alumno_id, clase_id, beneficiary.suscripcion_id, attendanceStatus, actor_id || null);
 
-        db.prepare(`
-          UPDATE reservations
-          SET status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE user_id = ?
-            AND class_id = ?
-            AND deleted_at IS NULL
-        `).run(attendanceStatus, alumno_id, clase_id);
+        if (existingReservation) {
+          db.prepare(`
+            UPDATE reservations
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(attendanceStatus, existingReservation.id);
+        }
 
         if (attendanceStatus === 'attended') {
           db.prepare(`
@@ -1984,13 +2107,185 @@ async function startServer() {
   });
 
   app.post('/api/classes', (req, res) => {
-    const { type, date, start_time, end_time, capacity, created_by } = req.body;
+    const { class_type_id, date, start_time, end_time, capacity, created_by } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
     try {
-      db.prepare('INSERT INTO classes (id, type, date, start_time, end_time, capacity, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, type, date, start_time, end_time, capacity, created_by);
+      if (!class_type_id) {
+        return res.status(400).json({ error: 'class_type_id is required' });
+      }
+
+      const classType = db.prepare(`
+        SELECT id, name
+        FROM class_types
+        WHERE id = ?
+          AND is_active = 1
+      `).get(class_type_id) as { id: string; name: string } | undefined;
+
+      if (!classType) {
+        return res.status(400).json({ error: 'Invalid class_type_id' });
+      }
+
+      db.prepare(`
+        INSERT INTO classes (id, type, class_type_id, date, start_time, end_time, capacity, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        classType.name,
+        classType.id,
+        date,
+        start_time,
+        end_time,
+        capacity,
+        created_by
+      );
       res.json({ success: true, id });
     } catch (error) {
       res.status(500).json({ error: 'Failed to create class' });
+    }
+  });
+
+  app.delete('/api/reservations/:id', (req, res) => {
+    try {
+      const reservationId = req.params.id;
+
+      const tx = db.transaction(() => {
+        const reservation = db.prepare(`
+          SELECT r.*, c.date, c.start_time
+          FROM reservations r
+          JOIN classes c ON c.id = r.class_id
+          WHERE r.id = ?
+            AND r.deleted_at IS NULL
+        `).get(reservationId) as any;
+
+        if (!reservation) {
+          throw new Error('RESERVATION_NOT_FOUND');
+        }
+
+        db.prepare(`
+          UPDATE reservations
+          SET status = 'cancelled',
+              deleted_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(reservationId);
+
+        // Solo devuelve crédito si la reserva estaba activa (no asistida/no_show).
+        if (reservation.status === 'active' && reservation.beneficiario_id && reservation.suscripcion_id) {
+          db.prepare(`
+            UPDATE suscripcion_beneficiarios
+            SET clases_restantes = clases_restantes + 1,
+                estado = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(reservation.beneficiario_id);
+
+          db.prepare(`
+            UPDATE suscripciones_alumno
+            SET clases_restantes = (
+                SELECT COALESCE(SUM(clases_restantes), 0)
+                FROM suscripcion_beneficiarios
+                WHERE suscripcion_id = suscripciones_alumno.id
+                  AND deleted_at IS NULL
+              ),
+              clases_consumidas = MAX(
+                0,
+                clases_totales - (
+                  SELECT COALESCE(SUM(clases_restantes), 0)
+                  FROM suscripcion_beneficiarios
+                  WHERE suscripcion_id = suscripciones_alumno.id
+                    AND deleted_at IS NULL
+                )
+              ),
+              estado = CASE
+                WHEN estado = 'expired' THEN 'expired'
+                WHEN (
+                  SELECT COALESCE(SUM(clases_restantes), 0)
+                  FROM suscripcion_beneficiarios
+                  WHERE suscripcion_id = suscripciones_alumno.id
+                    AND deleted_at IS NULL
+                ) <= 0 THEN 'depleted'
+                ELSE 'active'
+              END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(reservation.suscripcion_id);
+
+          syncStudentCredits(reservation.user_id);
+        }
+      });
+
+      tx();
+      res.json({ success: true });
+    } catch (error: any) {
+      if (error.message === 'RESERVATION_NOT_FOUND') {
+        return res.status(404).json({ error: 'Reserva no encontrada' });
+      }
+      res.status(500).json({ error: 'Failed to cancel reservation', details: error.message });
+    }
+  });
+
+  app.get('/api/class-types', (req, res) => {
+    try {
+      const includeInactive = String(req.query.includeInactive || 'false') === 'true';
+      const rows = includeInactive
+        ? db.prepare(`SELECT * FROM class_types ORDER BY is_active DESC, name ASC`).all()
+        : db.prepare(`SELECT * FROM class_types WHERE is_active = 1 ORDER BY name ASC`).all();
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to fetch class types', details: error.message });
+    }
+  });
+
+  app.post('/api/class-types', (req, res) => {
+    try {
+      const { name, image_url, icon, color_theme, is_active } = req.body;
+      if (!name) return res.status(400).json({ error: 'name is required' });
+
+      const id = createId('ctype_');
+      db.prepare(`
+        INSERT INTO class_types (id, name, image_url, icon, color_theme, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(id, name, image_url || null, icon || null, color_theme || null, is_active === 0 ? 0 : 1);
+
+      const created = db.prepare(`SELECT * FROM class_types WHERE id = ?`).get(id);
+      res.json({ success: true, classType: created });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to create class type', details: error.message });
+    }
+  });
+
+  app.put('/api/class-types/:id', (req, res) => {
+    try {
+      const { name, image_url, icon, color_theme, is_active } = req.body;
+      db.prepare(`
+        UPDATE class_types
+        SET name = COALESCE(?, name),
+            image_url = ?,
+            icon = ?,
+            color_theme = ?,
+            is_active = COALESCE(?, is_active),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(name || null, image_url || null, icon || null, color_theme || null, is_active, req.params.id);
+
+      const updated = db.prepare(`SELECT * FROM class_types WHERE id = ?`).get(req.params.id);
+      res.json({ success: true, classType: updated });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to update class type', details: error.message });
+    }
+  });
+
+  app.delete('/api/class-types/:id', (req, res) => {
+    try {
+      db.prepare(`
+        UPDATE class_types
+        SET is_active = 0,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to delete class type', details: error.message });
     }
   });
 

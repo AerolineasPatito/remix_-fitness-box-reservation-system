@@ -86,7 +86,8 @@ const App: React.FC = () => {
         const formatted = data.map((d: any) => ({
           ...d,
           startTime: d.start_time.substring(0, 5),
-          endTime: d.end_time.substring(0, 5)
+          endTime: d.end_time.substring(0, 5),
+          imageUrl: d.image_url || d.imageUrl || ''
         }));
         setInstances(formatted);
       }

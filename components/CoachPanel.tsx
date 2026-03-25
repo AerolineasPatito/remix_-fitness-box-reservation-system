@@ -42,12 +42,22 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [yearLoading, setYearLoading] = useState(false);
   const [yearInstances, setYearInstances] = useState<ClassInstance[]>([]);
+  const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string }>>([]);
+  const [classTypesLoading, setClassTypesLoading] = useState(false);
+  const [showTypeManager, setShowTypeManager] = useState(false);
+  const [classTypeForm, setClassTypeForm] = useState({
+    name: '',
+    image_url: '',
+    icon: '',
+    color_theme: ''
+  });
   
   const datePickerRef = useRef<HTMLInputElement>(null);
   const startTimePickerRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     type: ClassType.FUNCTIONAL,
+    classTypeId: '',
     date: new Date().toISOString().split('T')[0], // Hoy por defecto
     startTime: '07:00',
     endTime: '08:00'
@@ -57,8 +67,29 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     (Array.isArray(data) ? data : []).map((d: any) => ({
       ...d,
       startTime: (d.start_time || d.startTime || '').substring(0, 5),
-      endTime: (d.end_time || d.endTime || '').substring(0, 5)
+      endTime: (d.end_time || d.endTime || '').substring(0, 5),
+      imageUrl: d.image_url || d.imageUrl || ''
     }));
+
+  const fetchClassTypes = async () => {
+    setClassTypesLoading(true);
+    try {
+      const rows = await api.getClassTypes();
+      const safeRows = Array.isArray(rows) ? rows : [];
+      setClassTypes(safeRows);
+      if (!formData.classTypeId && safeRows.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          classTypeId: safeRows[0].id,
+          type: safeRows[0].name as ClassType
+        }));
+      }
+    } catch (err: any) {
+      logger.error('Error loading class types', err);
+    } finally {
+      setClassTypesLoading(false);
+    }
+  };
 
   // Validación de horario conflictivo en tiempo real
   const hasScheduleConflict = useMemo(() => {
@@ -82,6 +113,12 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
   useEffect(() => {
     if (activeTab === 'students') fetchStudents();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'sessions') {
+      fetchClassTypes();
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -194,6 +231,23 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       logger.error('Error fetching students', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateClassType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!classTypeForm.name.trim()) return;
+    try {
+      await api.createClassType({
+        name: classTypeForm.name.trim(),
+        image_url: classTypeForm.image_url.trim() || null,
+        icon: classTypeForm.icon.trim() || null,
+        color_theme: classTypeForm.color_theme.trim() || null
+      });
+      setClassTypeForm({ name: '', image_url: '', icon: '', color_theme: '' });
+      await fetchClassTypes();
+    } catch (err: any) {
+      logger.error('Error creating class type', err);
     }
   };
 
@@ -337,6 +391,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     console.log('=== CREANDO CLASE EN SERVIDOR ===');
     console.log('FormData a enviar:', {
       type: formData.type,
+      class_type_id: formData.classTypeId,
       date: formData.date,
       start_time: formData.startTime,
       end_time: formData.endTime,
@@ -347,6 +402,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     try {
       await api.createClass({
         type: formData.type,
+        class_type_id: formData.classTypeId,
         date: formData.date,
         start_time: formData.startTime,
         end_time: formData.endTime,
@@ -359,6 +415,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       // Reset form
       setFormData({
         type: ClassType.FUNCTIONAL,
+        classTypeId: classTypes[0]?.id || '',
         date: new Date().toISOString().split('T')[0],
         startTime: '07:00',
         endTime: '08:00'
@@ -516,6 +573,83 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           </div>
         )}
 
+        {showTypeManager && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-zinc-900/80" onClick={() => setShowTypeManager(false)}></div>
+            <div className="relative bg-white w-full max-w-3xl rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-bebas tracking-wide uppercase italic">Gestionar Tipos de Entrenamiento</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowTypeManager(false)}
+                  className="w-9 h-9 rounded-lg border border-zinc-200 text-zinc-500 hover:text-zinc-900"
+                >
+                  <i className="fas fa-times"></i>
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateClassType} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  required
+                  value={classTypeForm.name}
+                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Nombre del tipo"
+                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                />
+                <input
+                  type="url"
+                  value={classTypeForm.image_url}
+                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, image_url: e.target.value }))}
+                  placeholder="URL de imagen"
+                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                />
+                <input
+                  type="text"
+                  value={classTypeForm.icon}
+                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, icon: e.target.value }))}
+                  placeholder="Icono (ej: fa-dumbbell)"
+                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                />
+                <input
+                  type="text"
+                  value={classTypeForm.color_theme}
+                  onChange={(e) => setClassTypeForm((prev) => ({ ...prev, color_theme: e.target.value }))}
+                  placeholder="Tema de color (ej: amber)"
+                  className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
+                />
+                <button
+                  type="submit"
+                  className="sm:col-span-2 bg-zinc-900 text-white rounded-xl py-3 text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
+                >
+                  Guardar Tipo
+                </button>
+              </form>
+
+              <div className="space-y-2 max-h-64 overflow-auto">
+                {classTypes.map((row) => (
+                  <div key={row.id} className="flex items-center justify-between border border-zinc-100 rounded-xl p-3">
+                    <div className="flex items-center gap-3">
+                      {row.image_url ? (
+                        <img src={row.image_url} alt={row.name} className="w-12 h-12 rounded-lg object-cover border border-zinc-200" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-zinc-100 flex items-center justify-center">
+                          <i className={`fas ${row.icon || 'fa-dumbbell'} text-zinc-500`}></i>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm font-bold text-zinc-900">{row.name}</p>
+                        <p className="text-[10px] uppercase tracking-widest text-zinc-400">{row.color_theme || 'default'}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {classTypes.length === 0 && <p className="text-sm text-zinc-400">No hay tipos registrados.</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Content */}
         {/* Content Tabs con Scroll Optimizado */}
         {activeTab === 'sessions' ? (
@@ -523,7 +657,16 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
             {/* Formulario de Creación - Mobile Optimizado */}
             <div className="bg-white border-2 border-zinc-50 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 lg:p-8 shadow-xl">
               <div className="mb-6 sm:mb-8">
-                <h3 className="text-2xl sm:text-3xl font-bebas text-zinc-900 tracking-wide uppercase italic">Crear Nueva Clase</h3>
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-2xl sm:text-3xl font-bebas text-zinc-900 tracking-wide uppercase italic">Crear Nueva Clase</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowTypeManager(true)}
+                    className="px-4 py-2 text-[9px] font-black uppercase tracking-widest rounded-xl bg-zinc-900 text-white hover:bg-brand transition-all"
+                  >
+                    Gestionar Tipos
+                  </button>
+                </div>
                 <p className="text-[8px] sm:text-[10px] text-zinc-400 font-black uppercase tracking-widest mt-2">Programa una nueva sesión</p>
               </div>
               
@@ -532,24 +675,25 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 <div>
                   <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Tipo de Entrenamiento</label>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
-                    {Object.keys(CLASS_METADATA).map(t => (
+                    {classTypes.map((t) => (
                       <button
-                        key={t}
+                        key={t.id}
                         type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, type: t as ClassType }))}
+                        onClick={() => setFormData(prev => ({ ...prev, classTypeId: t.id, type: t.name as ClassType }))}
                         className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border transition-all ${
-                          formData.type === t 
+                          formData.classTypeId === t.id
                             ? 'border-brand bg-brand/5 text-brand shadow-lg' 
                             : 'border-zinc-100 bg-white text-zinc-400 hover:border-zinc-200'
                         }`}
                       >
-                        <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto ${formData.type === t ? CLASS_METADATA[t].color + ' text-white' : 'bg-zinc-100 text-zinc-400'}`}>
-                          <i className={`fas ${CLASS_METADATA[t].icon} text-xs sm:text-sm`}></i>
+                        <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto ${formData.classTypeId === t.id ? 'bg-brand text-white' : 'bg-zinc-100 text-zinc-400'}`}>
+                          <i className={`fas ${t.icon || 'fa-dumbbell'} text-xs sm:text-sm`}></i>
                         </div>
-                        <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-tight block text-center leading-tight">{t.split('_').slice(0, 2).join(' ')}</span>
+                        <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-tight block text-center leading-tight">{t.name}</span>
                       </button>
                     ))}
                   </div>
+                  {classTypesLoading && <p className="text-[9px] text-zinc-400 mt-2">Cargando tipos...</p>}
                 </div>
                 
                 {/* Fecha y Hora - Mobile Stacked */}
@@ -585,7 +729,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 )}
                 
                 <button 
-                  disabled={loading || hasScheduleConflict} 
+                  disabled={loading || hasScheduleConflict || !formData.classTypeId} 
                   className={`w-full py-4 sm:py-6 font-black rounded-xl sm:rounded-[2rem] text-[9px] sm:text-[12px] uppercase tracking-[0.4em] shadow-2xl active:scale-95 transition-all ${
                     hasScheduleConflict 
                       ? 'bg-rose-100 text-rose-300 cursor-not-allowed' 
@@ -636,6 +780,13 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
                 {!yearLoading && yearInstances.map(inst => (
                   <div key={inst.id} className="bg-white border border-zinc-100 p-4 sm:p-6 rounded-xl sm:rounded-[2rem] hover:border-brand transition-all hover:shadow-lg">
+                    {inst.imageUrl && (
+                      <img
+                        src={inst.imageUrl}
+                        alt={inst.type}
+                        className="w-full h-32 sm:h-40 object-cover rounded-xl mb-4 border border-zinc-100"
+                      />
+                    )}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                       <div className="flex items-center space-x-3 sm:space-x-4">
                         <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-[1.5rem] flex items-center justify-center text-white ${getClassMeta(inst.type).color} shadow-lg flex-shrink-0`}>

@@ -181,6 +181,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability }) =
                 : 'border-zinc-100 hover:border-brand/30 hover:shadow-2xl hover:shadow-cyan-900/5'
               }`}
             >
+              {inst.imageUrl && (
+                <img
+                  src={inst.imageUrl}
+                  alt={inst.type}
+                  className="w-full sm:w-40 h-28 object-cover rounded-2xl border border-zinc-100"
+                />
+              )}
               <div className="flex items-center space-x-10 w-full sm:w-auto">
                 <div className="relative">
                   <div className={`text-center rounded-2xl p-4 min-w-[100px] border ${

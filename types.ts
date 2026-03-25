@@ -21,11 +21,13 @@ export interface Profile {
 
 export interface ClassInstance {
   id: string;
-  type: ClassType;
+  type: string;
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
   endTime: string;
   capacity: number;
+  imageUrl?: string;
+  class_type_id?: string;
 }
 
 // Represents a template for a weekly recurring class session

@@ -45,6 +45,32 @@ export const api = {
     const res = await fetch(`/api/classes${query ? `?${query}` : ''}`);
     return handleResponse(res);
   },
+  getClassTypes: async () => {
+    const res = await fetch('/api/class-types');
+    return handleResponse(res);
+  },
+  createClassType: async (data: any) => {
+    const res = await fetch('/api/class-types', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+  updateClassType: async (id: string, data: any) => {
+    const res = await fetch(`/api/class-types/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+  deleteClassType: async (id: string) => {
+    const res = await fetch(`/api/class-types/${id}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(res);
+  },
   getAvailability: async () => {
     const res = await fetch('/api/availability');
     return handleResponse(res);

@@ -254,6 +254,8 @@ class EmailService {
       startTime: string;
       endTime: string;
       ticketId: string;
+      cancellationLimitHours?: number;
+      cancellationDeadlineLabel?: string;
     }
   ): Promise<boolean> {
     const formattedDate = new Date(`${reservationDetails.classDate}T00:00:00`).toLocaleDateString('es-MX', {
@@ -286,6 +288,17 @@ class EmailService {
           <p style="font-size: 13px; color: #6b7280; margin-bottom: 0;">
             Te recomendamos llegar 10 minutos antes para iniciar puntual.
           </p>
+          <div style="margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
+            <p style="font-size: 14px; color: #111827; margin: 0 0 10px 0;"><strong>Política de Cancelación y Reservación</strong></p>
+            <p style="font-size: 13px; color: #6b7280; margin: 0 0 8px 0;">
+              Para garantizar una experiencia justa para todos nuestros alumnos, te pedimos tomar en cuenta lo siguiente:
+            </p>
+            <p style="font-size: 13px; color: #374151; margin: 0 0 6px 0;">• Cancelación con tiempo: Puedes cancelar tu clase hasta el ${reservationDetails.cancellationDeadlineLabel || `${Number(reservationDetails.cancellationLimitHours || 8)} horas antes`} sin penalización. Tu crédito será devuelto automáticamente.</p>
+            <p style="font-size: 13px; color: #374151; margin: 0 0 6px 0;">• Cancelación tardía: Si cancelas fuera de ese límite, el crédito de la clase no será reembolsado.</p>
+            <p style="font-size: 13px; color: #374151; margin: 0 0 6px 0;">• Puntualidad: Te recomendamos llegar con anticipación. La clase inicia en el horario establecido.</p>
+            <p style="font-size: 13px; color: #374151; margin: 0 0 6px 0;">• Capacidad: Las clases tienen un cupo limitado. Tu lugar queda confirmado únicamente al completar la reservación.</p>
+            <p style="font-size: 13px; color: #374151; margin: 0;">• Cancelación por parte del negocio: En caso de que una clase sea cancelada por el coach o por no alcanzar el mínimo de participantes, recibirás una notificación por correo y tu crédito será devuelto en su totalidad.</p>
+          </div>
         </div>
       </div>
     `;

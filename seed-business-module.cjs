@@ -82,13 +82,8 @@ const run = db.transaction(() => {
     insertStudent.run(studentId, student.email, student.full_name, hash);
   }
 
-  const classTemplates = [
-    { type: 'Entrenamiento Funcional', weekday: 1, start: '07:00:00', end: '08:00:00', capacity: 14 },
-    { type: 'Sculpt and Strength', weekday: 2, start: '18:00:00', end: '19:00:00', capacity: 12 },
-    { type: 'HIIT Conditioning', weekday: 3, start: '07:00:00', end: '08:00:00', capacity: 12 },
-    { type: 'Sculpt Lower Body', weekday: 4, start: '18:00:00', end: '19:00:00', capacity: 12 },
-    { type: 'Full Body', weekday: 5, start: '08:00:00', end: '09:00:00', capacity: 14 }
-  ];
+  // Producción: las clases se crean manualmente desde el panel del coach (sin hardcode automático).
+  const classTemplates = [];
 
   const insertClass = db.prepare(`
     INSERT INTO classes (id, type, date, start_time, end_time, capacity, status, created_by, real_time_status, created_at, updated_at)
@@ -352,48 +347,50 @@ const run = db.transaction(() => {
   const usedByStudentDate = new Set();
   const attendedByStudent = {};
   let classCursor = 0;
-  for (const row of beneficiariesRows) {
-    const assigned = Number(row.clases_asignadas || 0);
-    const remaining = Number(row.clases_restantes || 0);
-    const consumed = Math.max(0, assigned - remaining);
-    const studentId = row.alumno_id;
-    attendedByStudent[studentId] = attendedByStudent[studentId] || 0;
+  if (pastClasses.length > 0) {
+    for (const row of beneficiariesRows) {
+      const assigned = Number(row.clases_asignadas || 0);
+      const remaining = Number(row.clases_restantes || 0);
+      const consumed = Math.max(0, assigned - remaining);
+      const studentId = row.alumno_id;
+      attendedByStudent[studentId] = attendedByStudent[studentId] || 0;
 
-    for (let i = 0; i < consumed; i += 1) {
-      let selectedClass = null;
-      let attempts = 0;
-      while (!selectedClass && attempts < pastClasses.length) {
-        const candidate = pastClasses[classCursor % pastClasses.length];
-        classCursor += 3;
-        attempts += 1;
-        const key = `${studentId}_${candidate.date}`;
-        if (usedByStudentDate.has(key)) continue;
-        usedByStudentDate.add(key);
-        selectedClass = candidate;
-      }
-      if (!selectedClass) break;
+      for (let i = 0; i < consumed; i += 1) {
+        let selectedClass = null;
+        let attempts = 0;
+        while (!selectedClass && attempts < pastClasses.length) {
+          const candidate = pastClasses[classCursor % pastClasses.length];
+          classCursor += 3;
+          attempts += 1;
+          const key = `${studentId}_${candidate.date}`;
+          if (usedByStudentDate.has(key)) continue;
+          usedByStudentDate.add(key);
+          selectedClass = candidate;
+        }
+        if (!selectedClass) break;
 
-      const eventStatus = i % 5 === 0 ? 'no_show' : 'attended';
-      const eventDateTime = `${selectedClass.date}T${selectedClass.start_time}`;
+        const eventStatus = i % 5 === 0 ? 'no_show' : 'attended';
+        const eventDateTime = `${selectedClass.date}T${selectedClass.start_time}`;
 
-      insertReservation.run(
-        id('res_demo_'),
-        studentId,
-        selectedClass.id,
-        eventStatus,
-        eventDateTime,
-        eventDateTime
-      );
-      insertAttendance.run(
-        id('att_demo_'),
-        studentId,
-        selectedClass.id,
-        row.suscripcion_id,
-        eventStatus,
-        eventDateTime
-      );
-      if (eventStatus === 'attended') {
-        attendedByStudent[studentId] += 1;
+        insertReservation.run(
+          id('res_demo_'),
+          studentId,
+          selectedClass.id,
+          eventStatus,
+          eventDateTime,
+          eventDateTime
+        );
+        insertAttendance.run(
+          id('att_demo_'),
+          studentId,
+          selectedClass.id,
+          row.suscripcion_id,
+          eventStatus,
+          eventDateTime
+        );
+        if (eventStatus === 'attended') {
+          attendedByStudent[studentId] += 1;
+        }
       }
     }
   }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api, logger } from '../lib/api.ts';
 import { Profile } from '../types.ts';
 import { ForgotPassword } from './ForgotPassword.tsx';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 interface AuthProps {
   onLogin: (session: any) => void;
@@ -13,16 +14,24 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [whatsappPhone, setWhatsappPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
-  const [techDetails, setTechDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
+
+  useEffect(() => {
+    try {
+      const feedback = sessionStorage.getItem('focus_auth_feedback');
+      if (feedback) {
+        setError(feedback);
+        sessionStorage.removeItem('focus_auth_feedback');
+      }
+    } catch {}
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setTechDetails(null);
     setLoading(true);
 
     logger.log(`Intentando ${isLogin ? 'Login' : 'Registro'} para: ${email}`);
@@ -35,7 +44,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         onLogin(data.session);
         window.location.replace('/');
       } else {
-        const data = await api.register(email, password, fullName);
+        const data = await api.register(email, password, fullName, whatsappPhone);
         if (data.error) throw new Error(data.error);
         
         // Si el registro requiere verificación, mostrar pantalla de éxito
@@ -50,8 +59,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         window.location.replace('/');
       }
     } catch (err: any) {
-      setError(err.message || 'Ocurrió un error inesperado');
-      setTechDetails(err);
+      setError(getFriendlyErrorMessage(err, 'No pudimos iniciar tu sesión. Intenta de nuevo.'));
     } finally {
       setLoading(false);
     }
@@ -63,6 +71,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     setEmail('');
     setPassword('');
     setFullName('');
+    setWhatsappPhone('');
     setError(null);
   };
 
@@ -142,27 +151,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
               <div className="bg-rose-50 text-rose-500 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-center border border-rose-100">
                 {error}
               </div>
-              
-              <button 
-                onClick={() => setShowDebug(!showDebug)}
-                className="w-full text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-300 hover:text-zinc-500 transition-colors"
-              >
-                {showDebug ? 'Ocultar Detalles Técnicos' : 'Ver Detalles del Error'}
-              </button>
-
-              {showDebug && techDetails && (
-                <div className="bg-zinc-900 p-4 sm:p-6 rounded-xl sm:rounded-2xl overflow-hidden shadow-inner">
-                  <p className="text-[8px] sm:text-[9px] font-mono text-brand mb-2 uppercase tracking-widest">Detalle técnico:</p>
-                  <pre className="text-[8px] sm:text-[9px] font-mono text-zinc-400 whitespace-pre-wrap break-all leading-relaxed">
-                    {JSON.stringify(techDetails, null, 2)}
-                  </pre>
-                  <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-zinc-800">
-                    <p className="text-[7px] sm:text-[8px] text-zinc-500 font-bold uppercase italic">
-                      Nota: Si ves "Database error saving new user", revisa los logs de SQL en Supabase Dashboard.
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -177,6 +165,20 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                   placeholder="Nombre completo"
                   value={fullName}
                   onChange={e => setFullName(e.target.value)}
+                />
+              </div>
+            )}
+
+            {!isLogin && (
+              <div className="space-y-2 sm:space-y-3">
+                <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">WhatsApp</label>
+                <input
+                  required
+                  type="tel"
+                  className="w-full bg-zinc-50 border border-zinc-100 rounded-[1.2rem] sm:rounded-[1.5rem] px-6 sm:px-8 py-4 sm:py-5 focus:border-brand focus:bg-white transition-all text-sm outline-none font-bold"
+                  placeholder="+5215512345678"
+                  value={whatsappPhone}
+                  onChange={e => setWhatsappPhone(e.target.value)}
                 />
               </div>
             )}

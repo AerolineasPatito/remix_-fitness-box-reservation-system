@@ -59,6 +59,7 @@ async function startServer() {
         email_verification_expires TEXT,
         password_reset_token TEXT,
         password_reset_expires TEXT,
+        policy_accepted_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         deleted_at DATETIME
@@ -72,7 +73,12 @@ async function startServer() {
         start_time TEXT,
         end_time TEXT,
         capacity INTEGER DEFAULT 8,
+        min_capacity INTEGER DEFAULT 1,
+        max_capacity INTEGER DEFAULT 8,
         status TEXT DEFAULT 'active',
+        cancellation_reason TEXT,
+        cancellation_source TEXT,
+        cancellation_notified_at DATETIME,
         created_by TEXT,
         updated_by TEXT,
         canceled_by TEXT,
@@ -89,6 +95,10 @@ async function startServer() {
         suscripcion_id TEXT,
         beneficiario_id TEXT,
         status TEXT DEFAULT 'active',
+        cancellation_reason TEXT,
+        cancellation_notified_at DATETIME,
+        cancellation_notified_to_student INTEGER DEFAULT 0,
+        cancellation_notified_to_business INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         deleted_at DATETIME,
@@ -120,13 +130,20 @@ async function startServer() {
     addColumnIfMissing('profiles', 'email_verification_expires', 'TEXT');
     addColumnIfMissing('profiles', 'password_reset_token', 'TEXT');
     addColumnIfMissing('profiles', 'password_reset_expires', 'TEXT');
+    addColumnIfMissing('profiles', 'policy_accepted_at', 'DATETIME');
     addColumnIfMissing('profiles', 'patient_external_id', 'TEXT');
+    addColumnIfMissing('profiles', 'whatsapp_phone', 'TEXT');
     addColumnIfMissing('profiles', 'created_at', 'DATETIME');
     addColumnIfMissing('profiles', 'updated_at', 'DATETIME');
     addColumnIfMissing('profiles', 'deleted_at', 'DATETIME');
     db.prepare("UPDATE profiles SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)").run();
 
     addColumnIfMissing('classes', 'status', "TEXT DEFAULT 'active'");
+    addColumnIfMissing('classes', 'min_capacity', 'INTEGER DEFAULT 1');
+    addColumnIfMissing('classes', 'max_capacity', 'INTEGER DEFAULT 8');
+    addColumnIfMissing('classes', 'cancellation_reason', 'TEXT');
+    addColumnIfMissing('classes', 'cancellation_source', 'TEXT');
+    addColumnIfMissing('classes', 'cancellation_notified_at', 'DATETIME');
     addColumnIfMissing('classes', 'created_by', 'TEXT');
     addColumnIfMissing('classes', 'updated_by', 'TEXT');
     addColumnIfMissing('classes', 'canceled_by', 'TEXT');
@@ -136,12 +153,22 @@ async function startServer() {
     addColumnIfMissing('classes', 'updated_at', 'DATETIME');
     addColumnIfMissing('classes', 'deleted_at', 'DATETIME');
     db.prepare("UPDATE classes SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)").run();
+    db.prepare(`
+      UPDATE classes
+      SET max_capacity = COALESCE(NULLIF(max_capacity, 0), capacity, 8),
+          min_capacity = COALESCE(NULLIF(min_capacity, 0), 1),
+          capacity = COALESCE(NULLIF(max_capacity, 0), capacity, 8)
+    `).run();
 
     addColumnIfMissing('reservations', 'created_at', 'DATETIME');
     addColumnIfMissing('reservations', 'updated_at', 'DATETIME');
     addColumnIfMissing('reservations', 'deleted_at', 'DATETIME');
     addColumnIfMissing('reservations', 'suscripcion_id', 'TEXT');
     addColumnIfMissing('reservations', 'beneficiario_id', 'TEXT');
+    addColumnIfMissing('reservations', 'cancellation_reason', 'TEXT');
+    addColumnIfMissing('reservations', 'cancellation_notified_at', 'DATETIME');
+    addColumnIfMissing('reservations', 'cancellation_notified_to_student', 'INTEGER DEFAULT 0');
+    addColumnIfMissing('reservations', 'cancellation_notified_to_business', 'INTEGER DEFAULT 0');
     db.prepare("UPDATE reservations SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)").run();
 
     db.exec(`
@@ -267,6 +294,18 @@ async function startServer() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS whatsapp_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        body TEXT NOT NULL,
+        is_default_cancellation INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        updated_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE INDEX IF NOT EXISTS idx_suscripciones_alumno_estado ON suscripciones_alumno(alumno_id, estado);
       CREATE INDEX IF NOT EXISTS idx_suscripciones_vencimiento ON suscripciones_alumno(fecha_vencimiento);
       CREATE INDEX IF NOT EXISTS idx_beneficiarios_suscripcion ON suscripcion_beneficiarios(suscripcion_id, alumno_id);
@@ -332,26 +371,312 @@ async function startServer() {
       );
     }
 
-    const existingCancellationSetting = db.prepare(`
-      SELECT setting_key
-      FROM system_settings
-      WHERE setting_key = 'cancellation_limit_hours'
-    `).get();
-    if (!existingCancellationSetting) {
+    const ensureSystemSetting = (key: string, value: string) => {
+      const exists = db.prepare(`
+        SELECT setting_key
+        FROM system_settings
+        WHERE setting_key = ?
+      `).get(key);
+      if (!exists) {
+        db.prepare(`
+          INSERT INTO system_settings (setting_key, setting_value, updated_at)
+          VALUES (?, ?, CURRENT_TIMESTAMP)
+        `).run(key, value);
+      }
+    };
+
+    ensureSystemSetting('cancellation_limit_hours', '8');
+    ensureSystemSetting('cancellation_cutoff_morning', '08:00');
+    ensureSystemSetting('cancellation_deadline_evening', '22:00');
+
+    // Legacy cleanup: business notification email now comes from global email config only.
+    db.prepare(`
+      DELETE FROM system_settings
+      WHERE setting_key = 'business_notification_email'
+    `).run();
+
+    const whatsappTemplatesCount = db.prepare(`SELECT COUNT(*) as count FROM whatsapp_templates`).get() as { count: number };
+    if ((whatsappTemplatesCount?.count || 0) === 0) {
       db.prepare(`
-        INSERT INTO system_settings (setting_key, setting_value, updated_at)
-        VALUES ('cancellation_limit_hours', '8', CURRENT_TIMESTAMP)
-      `).run();
+        INSERT INTO whatsapp_templates (
+          id, name, body, is_default_cancellation, is_active, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(
+        createId('watpl_'),
+        'Cancelación de clase',
+        'Hola {{nombre_alumno}}, tu clase "{{clase_activa}}" del {{fecha_cancelacion}} fue cancelada. Si necesitas apoyo para reagendar, estoy pendiente.',
+        'system'
+      );
     }
 
-    const getCancellationLimitHours = () => {
+    const getSettingValue = (key: string, fallback: string) => {
       const row = db.prepare(`
         SELECT setting_value
         FROM system_settings
-        WHERE setting_key = 'cancellation_limit_hours'
-      `).get() as { setting_value: string } | undefined;
-      const parsed = Number(row?.setting_value || 8);
+        WHERE setting_key = ?
+      `).get(key) as { setting_value: string } | undefined;
+      return String(row?.setting_value ?? fallback);
+    };
+
+    const sanitizeHourMinute = (raw: string, fallback: string) => {
+      const value = String(raw || '').trim();
+      if (!/^\d{2}:\d{2}$/.test(value)) return fallback;
+      const [h, m] = value.split(':').map(Number);
+      if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+        return fallback;
+      }
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    const getCancellationLimitHours = () => {
+      const parsed = Number(getSettingValue('cancellation_limit_hours', '8'));
       return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+    };
+
+    const getCancellationCutoffMorning = () =>
+      sanitizeHourMinute(getSettingValue('cancellation_cutoff_morning', '08:00'), '08:00');
+
+    const getCancellationDeadlineEvening = () =>
+      sanitizeHourMinute(getSettingValue('cancellation_deadline_evening', '22:00'), '22:00');
+
+    const buildDateWithClock = (baseDate: Date, hhmm: string) => {
+      const [hour, minute] = hhmm.split(':').map(Number);
+      const next = new Date(baseDate);
+      next.setHours(hour, minute, 0, 0);
+      return next;
+    };
+
+    const calculateCancellationDeadline = (classDate: string, classStartTime: string) => {
+      const classDateTime = new Date(`${classDate}T${String(classStartTime || '00:00').slice(0, 5)}:00`);
+      const normalDeadline = new Date(classDateTime.getTime() - getCancellationLimitHours() * 60 * 60 * 1000);
+      const cutoffMorning = getCancellationCutoffMorning();
+      const deadlineEvening = getCancellationDeadlineEvening();
+      const [cutoffHour, cutoffMinute] = cutoffMorning.split(':').map(Number);
+      const normalMinutes = normalDeadline.getHours() * 60 + normalDeadline.getMinutes();
+      const cutoffMinutes = cutoffHour * 60 + cutoffMinute;
+
+      if (normalMinutes < cutoffMinutes) {
+        const previousDay = new Date(classDateTime);
+        previousDay.setDate(previousDay.getDate() - 1);
+        return buildDateWithClock(previousDay, deadlineEvening);
+      }
+
+      return normalDeadline;
+    };
+
+    const formatCancellationDeadlineLabel = (deadline: Date) =>
+      deadline.toLocaleString('es-MX', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+ 
+
+    const getBusinessNotificationEmail = () => {
+      const fromSmtp = String(emailConfig?.smtp?.user || '').trim();
+      return fromSmtp || '';
+    };
+
+    const sendEmailSafe = async (to: string, subject: string, html: string) => {
+      if (!to) return false;
+      try {
+        return await emailService.sendEmail({ to, subject, html });
+      } catch (error) {
+        console.error('Error enviando email:', { to, subject, error });
+        return false;
+      }
+    };
+
+    const formatDateTimeLabel = (date: string, startTime: string, endTime?: string) => {
+      const start = `${String(startTime || '').slice(0, 5)}`;
+      const end = endTime ? ` - ${String(endTime).slice(0, 5)}` : '';
+      const dateText = new Date(`${date}T00:00:00`).toLocaleDateString('es-MX', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric'
+      });
+      return `${dateText} ${start}${end}`;
+    };
+
+    const buildStudentCancellationEmail = (params: {
+      studentName: string;
+      className: string;
+      date: string;
+      startTime: string;
+      endTime?: string;
+      reason: string;
+      returnedCredit: boolean;
+    }) => `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 20px; background: #f8fafc;">
+        <div style="background: #111827; color: #fff; padding: 24px; border-radius: 14px 14px 0 0;">
+          <h2 style="margin: 0; color: #22d3ee;">Focus Fitness</h2>
+          <p style="margin: 8px 0 0 0;">Confirmación de cancelación</p>
+        </div>
+        <div style="background: #fff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 14px 14px;">
+          <p>Hola ${params.studentName},</p>
+          <p>Tu reserva fue cancelada correctamente.</p>
+          <ul>
+            <li><strong>Clase:</strong> ${params.className}</li>
+            <li><strong>Horario:</strong> ${formatDateTimeLabel(params.date, params.startTime, params.endTime)}</li>
+            <li><strong>Motivo:</strong> ${params.reason}</li>
+            <li><strong>Crédito:</strong> ${params.returnedCredit ? 'Devuelto a tu saldo' : 'No se devuelve por política de cancelación tardía'}</li>
+          </ul>
+        </div>
+      </div>
+    `;
+
+    const buildBusinessCancellationEmail = (params: {
+      title: string;
+      studentName?: string;
+      studentEmail?: string;
+      className: string;
+      date: string;
+      startTime: string;
+      endTime?: string;
+      reason: string;
+      returnedCredit?: boolean;
+      source: string;
+      notifiedStudents?: Array<{ full_name?: string; email?: string; whatsapp_phone?: string }>;
+    }) => `
+      <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; padding: 20px; background: #f8fafc;">
+        <div style="background: #111827; color: #fff; padding: 24px; border-radius: 14px 14px 0 0;">
+          <h2 style="margin: 0; color: #22d3ee;">Focus Fitness</h2>
+          <p style="margin: 8px 0 0 0;">${params.title}</p>
+        </div>
+        <div style="background: #fff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 14px 14px;">
+          <ul>
+            ${params.studentName ? `<li><strong>Alumno:</strong> ${params.studentName} (${params.studentEmail || 'sin correo'})</li>` : ''}
+            <li><strong>Clase:</strong> ${params.className}</li>
+            <li><strong>Horario:</strong> ${formatDateTimeLabel(params.date, params.startTime, params.endTime)}</li>
+            <li><strong>Origen:</strong> ${params.source}</li>
+            <li><strong>Motivo:</strong> ${params.reason}</li>
+            ${typeof params.returnedCredit === 'boolean' ? `<li><strong>Crédito:</strong> ${params.returnedCredit ? 'Devuelto' : 'No devuelto'}</li>` : ''}
+          </ul>
+          ${Array.isArray(params.notifiedStudents) && params.notifiedStudents.length > 0 ? `
+            <div style="margin-top: 16px;">
+              <p><strong>Alumnos notificados:</strong></p>
+              <ul>
+                ${params.notifiedStudents.map((student) => `
+                  <li>- ${student.full_name || 'Alumno sin nombre'} — ${student.email || 'sin correo'} — ${student.whatsapp_phone || 'sin WhatsApp'}</li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
+    const cancelClassAndRestoreCredits = (params: {
+      classId: string;
+      source: 'coach' | 'auto_min_capacity';
+      reason: string;
+      canceledBy?: string | null;
+    }) => {
+      const tx = db.transaction(() => {
+        const classRow = db.prepare(`
+          SELECT id, type, date, start_time, end_time, status, min_capacity, max_capacity, capacity
+          FROM classes
+          WHERE id = ?
+            AND deleted_at IS NULL
+        `).get(params.classId) as any;
+
+        if (!classRow) throw new Error('CLASS_NOT_FOUND');
+        if (classRow.status !== 'active') {
+          return { classRow, reservations: [] as any[], businessEmail: getBusinessNotificationEmail() };
+        }
+
+        const reservations = db.prepare(`
+          SELECT
+            r.id,
+            r.user_id,
+            r.suscripcion_id,
+            r.beneficiario_id,
+            r.status,
+            p.full_name,
+            p.email,
+            p.whatsapp_phone
+          FROM reservations r
+          JOIN profiles p ON p.id = r.user_id
+          WHERE r.class_id = ?
+            AND r.deleted_at IS NULL
+            AND r.status = 'active'
+        `).all(params.classId) as any[];
+
+        db.prepare(`
+          UPDATE classes
+          SET status = 'canceled',
+              real_time_status = 'canceled',
+              cancellation_reason = ?,
+              cancellation_source = ?,
+              canceled_by = COALESCE(?, canceled_by),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(params.reason, params.source, params.canceledBy || null, params.classId);
+
+        reservations.forEach((reservation) => {
+          db.prepare(`
+            UPDATE reservations
+            SET status = 'cancelled',
+                cancellation_reason = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).run(params.reason, reservation.id);
+
+          if (reservation.beneficiario_id && reservation.suscripcion_id) {
+            db.prepare(`
+              UPDATE suscripcion_beneficiarios
+              SET clases_restantes = clases_restantes + 1,
+                  estado = 'active',
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(reservation.beneficiario_id);
+
+            db.prepare(`
+              UPDATE suscripciones_alumno
+              SET clases_restantes = (
+                  SELECT COALESCE(SUM(clases_restantes), 0)
+                  FROM suscripcion_beneficiarios
+                  WHERE suscripcion_id = suscripciones_alumno.id
+                    AND deleted_at IS NULL
+                ),
+                clases_consumidas = MAX(
+                  0,
+                  clases_totales - (
+                    SELECT COALESCE(SUM(clases_restantes), 0)
+                    FROM suscripcion_beneficiarios
+                    WHERE suscripcion_id = suscripciones_alumno.id
+                      AND deleted_at IS NULL
+                  )
+                ),
+                estado = CASE
+                  WHEN estado = 'expired' THEN 'expired'
+                  WHEN (
+                    SELECT COALESCE(SUM(clases_restantes), 0)
+                    FROM suscripcion_beneficiarios
+                    WHERE suscripcion_id = suscripciones_alumno.id
+                      AND deleted_at IS NULL
+                  ) <= 0 THEN 'depleted'
+                  ELSE 'active'
+                END,
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(reservation.suscripcion_id);
+          }
+          syncStudentCredits(reservation.user_id);
+        });
+
+        return {
+          classRow,
+          reservations,
+          businessEmail: getBusinessNotificationEmail()
+        };
+      });
+
+      return tx();
     };
 
     addColumnIfMissing('suscripciones_alumno', 'congelado', 'INTEGER DEFAULT 0');
@@ -626,21 +951,131 @@ async function startServer() {
   // Initial check on server start
   setTimeout(checkYearlyReset, 10000);
 
+  const TECHNICAL_ERROR_PATTERN = /(sqlite|sql|stack|typeerror|referenceerror|syntaxerror|cannot read|undefined|errno|econn|node_modules)/i;
+  const sanitizeUserFacingError = (message: string, statusCode: number) => {
+    if (!message) {
+      return statusCode >= 500
+        ? 'Tuvimos un problema interno. Intenta de nuevo en unos minutos.'
+        : 'No pudimos procesar tu solicitud. Intenta de nuevo.';
+    }
+
+    if (statusCode === 401) return 'Tu sesión expiró. Inicia sesión de nuevo para continuar.';
+    if (statusCode === 403) return 'No tienes permiso para realizar esta acción.';
+    if (statusCode >= 500) return 'Tuvimos un problema interno. Intenta de nuevo en unos minutos.';
+
+    if (TECHNICAL_ERROR_PATTERN.test(String(message).toLowerCase())) {
+      return 'No pudimos procesar tu solicitud en este momento. Intenta de nuevo.';
+    }
+
+    return message;
+  };
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true })); // Para parsear formularios POST
-    console.log('Express middleware configured');
+  app.use((req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = ((body: any) => {
+      if (body && typeof body === 'object' && !Array.isArray(body)) {
+        const safeBody: any = { ...body };
+        if ('details' in safeBody) delete safeBody.details;
+        if ('stack' in safeBody) delete safeBody.stack;
+
+        if (typeof safeBody.error === 'string') {
+          safeBody.error = sanitizeUserFacingError(safeBody.error, res.statusCode || 500);
+        }
+        if (typeof safeBody.message === 'string' && res.statusCode >= 500) {
+          safeBody.message = 'No pudimos completar la operación. Intenta de nuevo en unos minutos.';
+        }
+        return originalJson(safeBody);
+      }
+      return originalJson(body);
+    }) as any;
+    next();
+  });
+  console.log('Express middleware configured');
 
     // Update real-time class statuses
-    const updateClassStatuses = () => {
+    const updateClassStatuses = async () => {
       const now = new Date();
-      const classes = db.prepare('SELECT id, date, start_time, end_time FROM classes').all();
+      const classes = db.prepare(`
+        SELECT id, type, date, start_time, end_time, status, min_capacity
+        FROM classes
+        WHERE deleted_at IS NULL
+      `).all() as any[];
       
-      classes.forEach((cls: any) => {
+      for (const cls of classes) {
+        if (cls.status === 'canceled') {
+          db.prepare('UPDATE classes SET real_time_status = ? WHERE id = ?').run('canceled', cls.id);
+          continue;
+        }
         const classDateTime = new Date(`${cls.date}T${cls.start_time}`);
         const endDateTime = new Date(`${cls.date}T${cls.end_time}`);
-        
+
+        if (cls.status === 'active' && now >= classDateTime && now < endDateTime) {
+          const activeReservations = db.prepare(`
+            SELECT COUNT(*) as count
+            FROM reservations
+            WHERE class_id = ?
+              AND status = 'active'
+              AND deleted_at IS NULL
+          `).get(cls.id) as { count: number };
+
+          const minRequired = Math.max(1, Number(cls.min_capacity || 1));
+          if (Number(activeReservations.count || 0) < minRequired) {
+            const result = cancelClassAndRestoreCredits({
+              classId: cls.id,
+              source: 'auto_min_capacity',
+              reason: `Cancelación automática: no alcanzó el mínimo de ${minRequired} alumnos.`,
+              canceledBy: null
+            });
+
+            const businessSubject = `Cancelación automática por mínimo no alcanzado - ${result.classRow.type}`;
+            const businessHtml = buildBusinessCancellationEmail({
+              title: 'Clase cancelada automáticamente',
+              className: result.classRow.type,
+              date: result.classRow.date,
+              startTime: result.classRow.start_time,
+              endTime: result.classRow.end_time,
+              reason: `No alcanzó el mínimo de ${minRequired} alumnos`,
+              source: 'Sistema automático'
+            });
+            const businessSent = await sendEmailSafe(result.businessEmail, businessSubject, businessHtml);
+
+            for (const reservation of result.reservations) {
+              const studentHtml = buildStudentCancellationEmail({
+                studentName: reservation.full_name || 'Atleta',
+                className: result.classRow.type,
+                date: result.classRow.date,
+                startTime: result.classRow.start_time,
+                endTime: result.classRow.end_time,
+                reason: 'La clase no alcanzó el mínimo de alumnos requerido.',
+                returnedCredit: true
+              });
+              const studentSent = await sendEmailSafe(
+                reservation.email,
+                `Clase cancelada - ${result.classRow.type}`,
+                studentHtml
+              );
+              db.prepare(`
+                UPDATE reservations
+                SET cancellation_notified_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cancellation_notified_at END,
+                    cancellation_notified_to_student = ?,
+                    cancellation_notified_to_business = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+              `).run(studentSent ? 1 : 0, studentSent ? 1 : 0, businessSent ? 1 : 0, reservation.id);
+            }
+
+            db.prepare(`
+              UPDATE classes
+              SET cancellation_notified_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cancellation_notified_at END
+              WHERE id = ?
+            `).run(result.reservations.length > 0 ? 1 : 0, cls.id);
+            continue;
+          }
+        }
+
         let newStatus = 'scheduled';
-        
         if (now >= classDateTime && now < endDateTime) {
           newStatus = 'in_progress';
         } else if (now >= endDateTime) {
@@ -650,14 +1085,16 @@ async function startServer() {
         // Update status if changed
         db.prepare('UPDATE classes SET real_time_status = ? WHERE id = ?')
           .run(newStatus, cls.id);
-      });
+      }
     };
 
     // Update statuses every 30 seconds
-    setInterval(updateClassStatuses, 30000);
+    setInterval(() => {
+      updateClassStatuses().catch((error) => console.error('Error actualizando estados de clase:', error));
+    }, 30000);
     
     // Run immediately on server start
-    updateClassStatuses();
+    updateClassStatuses().catch((error) => console.error('Error inicial actualizando estados de clase:', error));
 
     app.get('/api/health', (req, res) => {
       console.log('Health check requested');
@@ -672,7 +1109,7 @@ async function startServer() {
 
   // Auth Routes
   app.post('/api/auth/register', async (req, res) => {
-    const { email, password, fullName } = req.body;
+    const { email, password, fullName, whatsappPhone } = req.body;
     
     console.log('�🚨🚨 LLEGÓ PETICIÓN REGISTER 🚨🚨🚨');
     console.log('Body completo:', req.body);
@@ -685,6 +1122,15 @@ async function startServer() {
       if (!email || !password) {
       return res.status(400).json({ error: 'El correo electrónico y la contraseña son obligatorios.' });
       }
+      if (!whatsappPhone || !String(whatsappPhone).trim()) {
+        return res.status(400).json({ error: 'El número de WhatsApp es obligatorio.' });
+      }
+      const normalizedWhatsapp = String(whatsappPhone).trim().replace(/\s+/g, '');
+      const whatsappRegex = /^\+?[1-9]\d{9,14}$/;
+      if (!whatsappRegex.test(normalizedWhatsapp)) {
+        return res.status(400).json({ error: 'El número de WhatsApp no tiene un formato válido.' });
+      }
+
       const existing = db.prepare('SELECT * FROM profiles WHERE email = ?').get(email);
       if (existing) {
         console.log('⚠️  Email ya registrado:', email);
@@ -703,8 +1149,8 @@ async function startServer() {
       console.log('🔄 Creando usuario con email no verificado...');
       console.log('📧 Token de verificación:', verificationToken);
 
-      db.prepare('INSERT INTO profiles (id, email, full_name, password_hash, role, credits_remaining, email_verified, email_verification_token, email_verification_expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        id, email, fullName || 'Atleta Focus', hash, role, 10, 0, verificationToken, verificationExpires.toISOString()
+      db.prepare('INSERT INTO profiles (id, email, full_name, password_hash, role, credits_remaining, whatsapp_phone, email_verified, email_verification_token, email_verification_expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        id, email, fullName || 'Atleta Focus', hash, role, 10, normalizedWhatsapp, 0, verificationToken, verificationExpires.toISOString()
       );
 
       // Usar la instancia global de emailService
@@ -803,9 +1249,32 @@ async function startServer() {
     try {
       const year = typeof req.query.year === 'string' ? req.query.year.trim() : '';
       const isValidYear = /^\d{4}$/.test(year);
+      const includeAllStates = String(req.query.includeAllStates || 'false') === 'true';
+      const includeRoster = String(req.query.includeRoster || 'false') === 'true';
+      const yearClause = isValidYear ? ` AND strftime('%Y', c.date) = ?` : '';
+      const stateClause = includeAllStates ? '' : ` AND c.status = 'active'`;
 
-      const classes = isValidYear
-        ? db.prepare(`
+      const sql = includeRoster
+        ? `
+            SELECT
+              c.*,
+              COALESCE(ct.name, c.type) as type,
+              ct.image_url as image_url,
+              ct.icon as class_type_icon,
+              ct.color_theme as class_type_color_theme,
+              COUNT(r.id) as enrolled_count,
+              GROUP_CONCAT(p.full_name, '||') as enrolled_students
+            FROM classes c
+            LEFT JOIN class_types ct ON ct.id = c.class_type_id
+            LEFT JOIN reservations r ON r.class_id = c.id AND r.deleted_at IS NULL AND r.status = 'active'
+            LEFT JOIN profiles p ON p.id = r.user_id
+            WHERE c.deleted_at IS NULL
+              ${stateClause}
+              ${yearClause}
+            GROUP BY c.id
+            ORDER BY c.date ASC, c.start_time ASC
+          `
+        : `
             SELECT
               c.*,
               COALESCE(ct.name, c.type) as type,
@@ -814,28 +1283,135 @@ async function startServer() {
               ct.color_theme as class_type_color_theme
             FROM classes c
             LEFT JOIN class_types ct ON ct.id = c.class_type_id
-            WHERE c.status = 'active'
-              AND c.deleted_at IS NULL
-              AND strftime('%Y', c.date) = ?
+            WHERE c.deleted_at IS NULL
+              ${stateClause}
+              ${yearClause}
             ORDER BY c.date ASC, c.start_time ASC
-          `).all(year)
-        : db.prepare(`
-            SELECT
-              c.*,
-              COALESCE(ct.name, c.type) as type,
-              ct.image_url as image_url,
-              ct.icon as class_type_icon,
-              ct.color_theme as class_type_color_theme
-            FROM classes c
-            LEFT JOIN class_types ct ON ct.id = c.class_type_id
-            WHERE c.status = 'active'
-              AND c.deleted_at IS NULL
-            ORDER BY c.date ASC, c.start_time ASC
-          `).all();
+          `;
+
+      const rows = isValidYear ? db.prepare(sql).all(year) : db.prepare(sql).all();
+      const classes = includeRoster
+        ? (rows as any[]).map((row) => ({
+            ...row,
+            enrolled_count: Number(row.enrolled_count || 0),
+            enrolled_students: row.enrolled_students
+              ? String(row.enrolled_students).split('||').filter(Boolean)
+              : []
+          }))
+        : rows;
 
       res.json(classes);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/calendar/classes', (req, res) => {
+    try {
+      const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : '';
+      const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : '';
+      const viewerId = typeof req.query.viewerId === 'string' ? req.query.viewerId : '';
+
+      const classes = db.prepare(`
+        SELECT
+          c.id,
+          COALESCE(ct.name, c.type) as type,
+          c.class_type_id,
+          c.date,
+          c.start_time,
+          c.end_time,
+          COALESCE(c.max_capacity, c.capacity, 8) as max_capacity,
+          COALESCE(c.min_capacity, 1) as min_capacity,
+          c.status,
+          c.real_time_status,
+          ct.image_url,
+          ct.icon,
+          ct.color_theme
+        FROM classes c
+        LEFT JOIN class_types ct ON ct.id = c.class_type_id
+        WHERE c.deleted_at IS NULL
+          AND (? = '' OR date(c.date) >= date(?))
+          AND (? = '' OR date(c.date) <= date(?))
+        ORDER BY c.date ASC, c.start_time ASC
+      `).all(startDate, startDate, endDate, endDate) as any[];
+
+      const classIds = classes.map((row) => row.id).filter(Boolean);
+      let reservations: any[] = [];
+
+      if (classIds.length > 0) {
+        const placeholders = classIds.map(() => '?').join(', ');
+        reservations = db.prepare(`
+          SELECT
+            r.id as reservation_id,
+            r.class_id,
+            r.user_id,
+            p.full_name,
+            p.email,
+            p.whatsapp_phone
+          FROM reservations r
+          JOIN profiles p ON p.id = r.user_id
+          WHERE r.deleted_at IS NULL
+            AND r.status = 'active'
+            AND r.class_id IN (${placeholders})
+          ORDER BY datetime(r.created_at) ASC
+        `).all(...classIds) as any[];
+      }
+
+      const reservationsByClass = new Map<string, any[]>();
+      reservations.forEach((reservation) => {
+        const list = reservationsByClass.get(reservation.class_id) || [];
+        list.push(reservation);
+        reservationsByClass.set(reservation.class_id, list);
+      });
+
+      const payload = classes.map((classRow) => {
+        const participants = reservationsByClass.get(classRow.id) || [];
+        const reservationsCount = participants.length;
+        const maxCapacity = Number(classRow.max_capacity || 8);
+        const minCapacity = Number(classRow.min_capacity || 1);
+        const isCanceled = classRow.status === 'canceled' || classRow.real_time_status === 'canceled';
+        const isFinished = classRow.real_time_status === 'finished';
+        const isFull = reservationsCount >= maxCapacity;
+        const classStatus = isCanceled
+          ? 'cancelled'
+          : isFinished
+            ? 'finished'
+            : isFull
+              ? 'full'
+              : 'available';
+        const viewerReservation = viewerId
+          ? participants.find((participant) => participant.user_id === viewerId) || null
+          : null;
+
+        return {
+          ...classRow,
+          reservations_count: reservationsCount,
+          max_capacity: maxCapacity,
+          min_capacity: minCapacity,
+          remaining_spots: Math.max(0, maxCapacity - reservationsCount),
+          class_status: classStatus,
+          participants: participants.map((participant) => ({
+            reservation_id: participant.reservation_id,
+            user_id: participant.user_id,
+            full_name: participant.full_name,
+            email: participant.email,
+            whatsapp_phone: participant.whatsapp_phone
+          })),
+          viewer_reservation: viewerReservation
+            ? {
+                reservation_id: viewerReservation.reservation_id,
+                user_id: viewerReservation.user_id,
+                full_name: viewerReservation.full_name,
+                email: viewerReservation.email,
+                whatsapp_phone: viewerReservation.whatsapp_phone
+              }
+            : null
+        };
+      });
+
+      res.json(payload);
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudieron cargar las clases del calendario.', details: error.message });
     }
   });
 
@@ -863,13 +1439,44 @@ async function startServer() {
     }
   });
 
+  app.post('/api/profile/:id/policy-acceptance', (req, res) => {
+    try {
+      const profile = db.prepare(`
+        SELECT id, role
+        FROM profiles
+        WHERE id = ?
+          AND deleted_at IS NULL
+      `).get(req.params.id) as { id: string; role: string } | undefined;
+
+      if (!profile) {
+        return res.status(404).json({ error: 'No se encontró el perfil solicitado.' });
+      }
+
+      if (profile.role !== 'student') {
+        return res.status(400).json({ error: 'Solo los alumnos pueden aceptar la política de cancelación.' });
+      }
+
+      db.prepare(`
+        UPDATE profiles
+        SET policy_accepted_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(req.params.id);
+
+      const updatedProfile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+      res.json({ success: true, profile: updatedProfile });
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudo guardar la aceptación de la política.', details: error.message });
+    }
+  });
+
   app.get('/api/students/:id/dashboard', (req, res) => {
     try {
       refreshSubscriptions();
       const studentId = req.params.id;
 
       const profile = db.prepare(`
-        SELECT id, email, full_name, role, credits_remaining, total_attended
+        SELECT id, email, full_name, role, credits_remaining, total_attended, policy_accepted_at
         FROM profiles
         WHERE id = ?
           AND deleted_at IS NULL
@@ -924,7 +1531,7 @@ async function startServer() {
           AND r.status = 'active'
           AND r.deleted_at IS NULL
           AND c.deleted_at IS NULL
-          AND datetime(c.date || ' ' || c.start_time) >= datetime('now')
+          AND datetime(c.date || ' ' || c.start_time) >= datetime('now', 'localtime')
         ORDER BY datetime(c.date || ' ' || c.start_time) ASC
       `).all(studentId);
 
@@ -1013,15 +1620,19 @@ async function startServer() {
         }
 
         const userProfile = db.prepare(`
-          SELECT id
+          SELECT id, policy_accepted_at
           FROM profiles
           WHERE id = ?
             AND role = 'student'
             AND deleted_at IS NULL
-        `).get(userId) as { id: string } | undefined;
+        `).get(userId) as { id: string; policy_accepted_at?: string | null } | undefined;
 
         if (!userProfile) {
           throw new Error('USER_NOT_FOUND');
+        }
+
+        if (!userProfile.policy_accepted_at) {
+          throw new Error('POLICY_NOT_ACCEPTED');
         }
 
         const classStartIso = `${classInfo.date} ${classInfo.start_time}`;
@@ -1121,13 +1732,20 @@ async function startServer() {
       } | undefined;
 
       if (reservationDetails?.email && reservationDetails?.class_name && reservationDetails?.class_date) {
+        const cancellationLimitHours = getCancellationLimitHours();
+        const cancellationDeadline = calculateCancellationDeadline(
+          reservationDetails.class_date,
+          String(reservationDetails.start_time || '').slice(0, 5)
+        );
         emailService.sendReservationConfirmation(reservationDetails.email, {
           fullName: reservationDetails.full_name,
           className: reservationDetails.class_name,
           classDate: reservationDetails.class_date,
           startTime: String(reservationDetails.start_time || '').slice(0, 5),
           endTime: String(reservationDetails.end_time || '').slice(0, 5),
-          ticketId: reservationId
+          ticketId: reservationId,
+          cancellationLimitHours,
+          cancellationDeadlineLabel: formatCancellationDeadlineLabel(cancellationDeadline)
         }).then((sent) => {
           if (!sent) {
             console.warn('No se pudo enviar el correo de confirmación de reserva.');
@@ -1155,6 +1773,8 @@ async function startServer() {
           return res.status(404).json({ error: 'Usuario no encontrado' });
         case 'INSUFFICIENT_CREDITS_400':
           return res.status(400).json({ error: 'No tienes créditos suficientes' });
+        case 'POLICY_NOT_ACCEPTED':
+          return res.status(400).json({ error: 'Debes aceptar la política de cancelación para completar tu primera reserva.' });
         case 'INSUFFICIENT_CREDITS':
           return res.status(400).json({ error: 'No tienes créditos suficientes' });
         default:
@@ -1577,6 +2197,7 @@ async function startServer() {
           p.id,
           p.full_name,
           p.email,
+          p.whatsapp_phone,
           p.email_verified,
           p.patient_external_id,
           p.credits_remaining,
@@ -1609,7 +2230,7 @@ async function startServer() {
             AND s.deleted_at IS NULL
           ORDER BY
             CASE
-              WHEN s.estado = 'active' AND sb.estado = 'active' AND s.congelado = 0 AND datetime(s.fecha_vencimiento) >= datetime('now') THEN 0
+              WHEN s.estado = 'active' AND sb.estado = 'active' AND s.congelado = 0 AND datetime(s.fecha_vencimiento) >= datetime('now', 'localtime') THEN 0
               WHEN s.estado = 'active' THEN 1
               WHEN s.estado = 'depleted' THEN 2
               ELSE 3
@@ -1624,10 +2245,11 @@ async function startServer() {
           FROM reservations r
           JOIN classes c ON c.id = r.class_id
           WHERE r.user_id = ?
+            AND r.status = 'active'
             AND r.deleted_at IS NULL
             AND c.deleted_at IS NULL
-            AND datetime(c.date || ' ' || c.start_time) <= datetime('now')
-            AND datetime(c.date || ' ' || c.end_time) >= datetime('now')
+            AND datetime(c.date || ' ' || c.start_time) <= datetime('now', 'localtime')
+            AND datetime(c.date || ' ' || c.end_time) >= datetime('now', 'localtime')
           ORDER BY c.date ASC, c.start_time ASC
           LIMIT 1
         `).get(student.id);
@@ -1637,12 +2259,23 @@ async function startServer() {
           FROM reservations r
           JOIN classes c ON c.id = r.class_id
           WHERE r.user_id = ?
+            AND r.status = 'active'
             AND r.deleted_at IS NULL
             AND c.deleted_at IS NULL
-            AND datetime(c.date || ' ' || c.start_time) > datetime('now')
+            AND datetime(c.date || ' ' || c.start_time) > datetime('now', 'localtime')
           ORDER BY c.date ASC, c.start_time ASC
           LIMIT 1
         `).get(student.id);
+
+        const lastNotifiedCancellation = db.prepare(`
+          SELECT r.cancellation_notified_at
+          FROM reservations r
+          WHERE r.user_id = ?
+            AND r.status = 'cancelled'
+            AND r.cancellation_notified_to_student = 1
+          ORDER BY datetime(r.updated_at) DESC
+          LIMIT 1
+        `).get(student.id) as { cancellation_notified_at?: string } | undefined;
 
         let warningLowBattery = false;
         let daysToExpiry: number | null = null;
@@ -1661,6 +2294,8 @@ async function startServer() {
           current_subscription: currentSubscription || null,
           active_class: activeClass || null,
           next_class: nextClass || null,
+          notified_by_email: !!lastNotifiedCancellation?.cancellation_notified_at,
+          last_cancellation_notified_at: lastNotifiedCancellation?.cancellation_notified_at || null,
           warning_low_battery: warningLowBattery,
           days_to_expiry: daysToExpiry
         };
@@ -2290,7 +2925,7 @@ async function startServer() {
   });
 
   app.post('/api/classes', (req, res) => {
-    const { class_type_id, date, start_time, end_time, capacity, created_by } = req.body;
+    const { class_type_id, date, start_time, end_time, capacity, min_capacity, max_capacity, created_by } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
     try {
       if (!class_type_id) {
@@ -2308,9 +2943,21 @@ async function startServer() {
         return res.status(400).json({ error: 'El tipo de clase seleccionado no es válido.' });
       }
 
+      const maxCapacity = Number(max_capacity ?? capacity ?? 8);
+      const minCapacity = Number(min_capacity ?? 1);
+      if (!Number.isFinite(maxCapacity) || maxCapacity < 1) {
+        return res.status(400).json({ error: 'El máximo de alumnos debe ser mayor a 0.' });
+      }
+      if (!Number.isFinite(minCapacity) || minCapacity < 1) {
+        return res.status(400).json({ error: 'El mínimo de alumnos debe ser mayor a 0.' });
+      }
+      if (minCapacity > maxCapacity) {
+        return res.status(400).json({ error: 'El mínimo de alumnos no puede ser mayor al máximo.' });
+      }
+
       db.prepare(`
-        INSERT INTO classes (id, type, class_type_id, date, start_time, end_time, capacity, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO classes (id, type, class_type_id, date, start_time, end_time, capacity, min_capacity, max_capacity, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         classType.name,
@@ -2318,7 +2965,9 @@ async function startServer() {
         date,
         start_time,
         end_time,
-        capacity,
+        maxCapacity,
+        minCapacity,
+        maxCapacity,
         created_by
       );
       res.json({ success: true, id });
@@ -2327,7 +2976,225 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/reservations/:id', (req, res) => {
+  app.get('/api/coach/whatsapp-templates', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT *
+        FROM whatsapp_templates
+        WHERE is_active = 1
+        ORDER BY is_default_cancellation DESC, datetime(updated_at) DESC
+      `).all();
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudieron cargar las plantillas de WhatsApp.', details: error.message });
+    }
+  });
+
+  app.post('/api/coach/whatsapp-templates', (req, res) => {
+    try {
+      const { name, body, is_default_cancellation, actor_id } = req.body || {};
+      if (!name || !String(name).trim() || !body || !String(body).trim()) {
+        return res.status(400).json({ error: 'El nombre y el contenido de la plantilla son obligatorios.' });
+      }
+
+      if (Number(is_default_cancellation || 0) === 1) {
+        db.prepare(`
+          UPDATE whatsapp_templates
+          SET is_default_cancellation = 0,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE is_active = 1
+        `).run();
+      }
+
+      const id = createId('watpl_');
+      db.prepare(`
+        INSERT INTO whatsapp_templates (
+          id, name, body, is_default_cancellation, is_active, created_by, updated_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(
+        id,
+        String(name).trim(),
+        String(body).trim(),
+        Number(is_default_cancellation || 0) === 1 ? 1 : 0,
+        actor_id || null,
+        actor_id || null
+      );
+
+      const row = db.prepare(`SELECT * FROM whatsapp_templates WHERE id = ?`).get(id);
+      res.json({ success: true, template: row });
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudo crear la plantilla de WhatsApp.', details: error.message });
+    }
+  });
+
+  app.put('/api/coach/whatsapp-templates/:id', (req, res) => {
+    try {
+      const { name, body, is_default_cancellation, actor_id } = req.body || {};
+      if (Number(is_default_cancellation || 0) === 1) {
+        db.prepare(`
+          UPDATE whatsapp_templates
+          SET is_default_cancellation = 0,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE is_active = 1
+        `).run();
+      }
+
+      db.prepare(`
+        UPDATE whatsapp_templates
+        SET name = COALESCE(?, name),
+            body = COALESCE(?, body),
+            is_default_cancellation = COALESCE(?, is_default_cancellation),
+            updated_by = COALESCE(?, updated_by),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        name ? String(name).trim() : null,
+        body ? String(body).trim() : null,
+        is_default_cancellation == null ? null : (Number(is_default_cancellation) === 1 ? 1 : 0),
+        actor_id || null,
+        req.params.id
+      );
+
+      const row = db.prepare(`SELECT * FROM whatsapp_templates WHERE id = ?`).get(req.params.id);
+      res.json({ success: true, template: row });
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudo actualizar la plantilla de WhatsApp.', details: error.message });
+    }
+  });
+
+  app.delete('/api/coach/whatsapp-templates/:id', (req, res) => {
+    try {
+      db.prepare(`
+        UPDATE whatsapp_templates
+        SET is_active = 0,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudo eliminar la plantilla de WhatsApp.', details: error.message });
+    }
+  });
+
+  app.post('/api/classes/recurring', (req, res) => {
+    try {
+      const {
+        class_type_id,
+        start_date,
+        start_time,
+        end_time,
+        min_capacity,
+        max_capacity,
+        created_by,
+        recurrence_type,
+        weeks,
+        days_of_week
+      } = req.body || {};
+
+      if (!class_type_id || !start_date || !start_time || !end_time) {
+        return res.status(400).json({ error: 'class_type_id, start_date, start_time y end_time son obligatorios.' });
+      }
+
+      const classType = db.prepare(`
+        SELECT id, name
+        FROM class_types
+        WHERE id = ?
+          AND is_active = 1
+      `).get(class_type_id) as { id: string; name: string } | undefined;
+
+      if (!classType) {
+        return res.status(400).json({ error: 'El tipo de clase seleccionado no es válido.' });
+      }
+
+      const maxCapacity = Number(max_capacity ?? 8);
+      const minCapacity = Number(min_capacity ?? 1);
+      if (!Number.isFinite(maxCapacity) || maxCapacity < 1) {
+        return res.status(400).json({ error: 'El máximo de alumnos debe ser mayor a 0.' });
+      }
+      if (!Number.isFinite(minCapacity) || minCapacity < 1 || minCapacity > maxCapacity) {
+        return res.status(400).json({ error: 'El mínimo de alumnos debe ser válido y no mayor al máximo.' });
+      }
+
+      const totalWeeks = Math.max(1, Number(weeks || 4));
+      const start = new Date(`${start_date}T00:00:00`);
+      if (Number.isNaN(start.getTime())) {
+        return res.status(400).json({ error: 'start_date no es válida.' });
+      }
+      const end = new Date(start);
+      end.setDate(end.getDate() + totalWeeks * 7 - 1);
+
+      const recurrence = String(recurrence_type || 'weekly');
+      const customDays = Array.isArray(days_of_week)
+        ? days_of_week.map((d: any) => Number(d)).filter((d: number) => Number.isInteger(d) && d >= 0 && d <= 6)
+        : [];
+      const weeklyDays = customDays.length > 0 ? customDays : [start.getDay()];
+
+      const dateList: string[] = [];
+      for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+        const day = cursor.getDay();
+        const cursorDate = cursor.toISOString().slice(0, 10);
+        if (recurrence === 'daily') {
+          dateList.push(cursorDate);
+        } else if (recurrence === 'custom') {
+          if (customDays.includes(day)) dateList.push(cursorDate);
+        } else {
+          if (weeklyDays.includes(day)) dateList.push(cursorDate);
+        }
+      }
+
+      const insert = db.prepare(`
+        INSERT INTO classes (id, type, class_type_id, date, start_time, end_time, capacity, min_capacity, max_capacity, created_by, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `);
+      const exists = db.prepare(`
+        SELECT id
+        FROM classes
+        WHERE class_type_id = ?
+          AND date = ?
+          AND start_time = ?
+          AND deleted_at IS NULL
+        LIMIT 1
+      `);
+
+      const createdIds: string[] = [];
+      let skipped = 0;
+      const tx = db.transaction(() => {
+        dateList.forEach((classDate) => {
+          const duplicated = exists.get(classType.id, classDate, start_time);
+          if (duplicated) {
+            skipped += 1;
+            return;
+          }
+          const classId = createId('cls_');
+          insert.run(
+            classId,
+            classType.name,
+            classType.id,
+            classDate,
+            start_time,
+            end_time,
+            maxCapacity,
+            minCapacity,
+            maxCapacity,
+            created_by || null
+          );
+          createdIds.push(classId);
+        });
+      });
+      tx();
+
+      res.json({
+        success: true,
+        created: createdIds.length,
+        skipped,
+        ids: createdIds
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'No se pudieron crear las clases recurrentes.', details: error.message });
+    }
+  });
+
+  app.delete('/api/reservations/:id', async (req, res) => {
     try {
       const reservationId = req.params.id;
       const cancellationLimitHours = getCancellationLimitHours();
@@ -2346,17 +3213,21 @@ async function startServer() {
         }
 
         const classStart = new Date(`${reservation.date}T${String(reservation.start_time || '00:00').slice(0, 5)}:00`);
+        const cancellationDeadline = calculateCancellationDeadline(
+          reservation.date,
+          String(reservation.start_time || '00:00').slice(0, 5)
+        );
         const now = new Date();
-        const hoursUntilClass = (classStart.getTime() - now.getTime()) / (1000 * 60 * 60);
-        const isEarlyCancellation = hoursUntilClass >= cancellationLimitHours;
+        const isEarlyCancellation = now.getTime() <= cancellationDeadline.getTime();
 
         db.prepare(`
           UPDATE reservations
           SET status = 'cancelled',
               deleted_at = CURRENT_TIMESTAMP,
+              cancellation_reason = ?,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).run(reservationId);
+        `).run('Cancelación desde portal de alumno', reservationId);
 
         // Solo devuelve crédito si la reserva estaba activa y fue cancelación temprana.
         if (isEarlyCancellation && reservation.status === 'active' && reservation.beneficiario_id && reservation.suscripcion_id) {
@@ -2402,18 +3273,94 @@ async function startServer() {
           syncStudentCredits(reservation.user_id);
         }
 
+        const reservationDetail = db.prepare(`
+          SELECT
+            r.id,
+            r.user_id,
+            p.full_name,
+            p.email,
+            c.type as class_name,
+            c.date as class_date,
+            c.start_time,
+            c.end_time
+          FROM reservations r
+          JOIN profiles p ON p.id = r.user_id
+          JOIN classes c ON c.id = r.class_id
+          WHERE r.id = ?
+        `).get(reservationId) as any;
+
         return {
           isEarlyCancellation,
-          cancellationLimitHours
+          cancellationLimitHours,
+          cancellationDeadline,
+          classStart,
+          reservationDetail
         };
       });
 
       const result = tx();
+      const businessEmail = getBusinessNotificationEmail();
+      const details = result.reservationDetail;
+
+      let businessSent = false;
+      let studentSent = false;
+      if (details) {
+        const reason = result.isEarlyCancellation
+          ? 'Cancelación dentro del límite permitido.'
+          : `Cancelación tardía. El límite para cancelar fue ${formatCancellationDeadlineLabel(result.cancellationDeadline)}.`;
+
+        businessSent = await sendEmailSafe(
+          businessEmail,
+          `Cancelación de reserva - ${details.class_name}`,
+          buildBusinessCancellationEmail({
+            title: 'Reserva cancelada por alumno',
+            studentName: details.full_name,
+            studentEmail: details.email,
+            className: details.class_name,
+            date: details.class_date,
+            startTime: details.start_time,
+            endTime: details.end_time,
+            reason,
+            returnedCredit: result.isEarlyCancellation,
+            source: 'Portal de alumno'
+          })
+        );
+
+        studentSent = await sendEmailSafe(
+          details.email,
+          `Confirmación de cancelación - ${details.class_name}`,
+          buildStudentCancellationEmail({
+            studentName: details.full_name || 'Atleta',
+            className: details.class_name,
+            date: details.class_date,
+            startTime: details.start_time,
+            endTime: details.end_time,
+            reason,
+            returnedCredit: result.isEarlyCancellation
+          })
+        );
+
+        db.prepare(`
+          UPDATE reservations
+          SET cancellation_notified_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cancellation_notified_at END,
+              cancellation_notified_to_student = ?,
+              cancellation_notified_to_business = ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(studentSent ? 1 : 0, studentSent ? 1 : 0, businessSent ? 1 : 0, reservationId);
+      }
+
       res.json({
         success: true,
         cancellationPolicy: {
           limitHours: result.cancellationLimitHours,
-          returnedCredit: result.isEarlyCancellation
+          returnedCredit: result.isEarlyCancellation,
+          cancellationDeadlineAt: result.cancellationDeadline.toISOString(),
+          cancellationDeadlineLabel: formatCancellationDeadlineLabel(result.cancellationDeadline)
+        },
+        notifications: {
+          businessEmailSent: businessSent,
+          studentEmailSent: studentSent
         }
       });
     } catch (error: any) {
@@ -2439,7 +3386,11 @@ async function startServer() {
   app.get('/api/system-settings/public', (req, res) => {
     try {
       const cancellationLimit = getCancellationLimitHours();
-      res.json({ cancellation_limit_hours: cancellationLimit });
+      res.json({
+        cancellation_limit_hours: cancellationLimit,
+        cancellation_cutoff_morning: getCancellationCutoffMorning(),
+        cancellation_deadline_evening: getCancellationDeadlineEvening()
+      });
     } catch (error: any) {
       res.status(500).json({ error: 'No se pudieron cargar los ajustes públicos.', details: error.message });
     }
@@ -2518,13 +3469,92 @@ async function startServer() {
     }
   });
 
-  app.patch('/api/classes/:id/cancel', (req, res) => {
-    const { canceled_by } = req.body;
+  app.patch('/api/classes/:id/cancel', async (req, res) => {
+    const { canceled_by } = req.body || {};
     try {
-      db.prepare("UPDATE classes SET status = 'canceled', canceled_by = ? WHERE id = ?").run(canceled_by, req.params.id);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'No se pudo cancelar la clase.' });
+      const result = cancelClassAndRestoreCredits({
+        classId: req.params.id,
+        source: 'coach',
+        reason: 'Cancelada por coach',
+        canceledBy: canceled_by || null
+      });
+
+      if (!result?.classRow) {
+        return res.status(404).json({ error: 'Clase no encontrada.' });
+      }
+
+      const notifiedStudents: Array<{ full_name?: string; email?: string; whatsapp_phone?: string }> = [];
+
+      for (const reservation of result.reservations) {
+        const studentHtml = buildStudentCancellationEmail({
+          studentName: reservation.full_name || 'Atleta',
+          className: result.classRow.type,
+          date: result.classRow.date,
+          startTime: result.classRow.start_time,
+          endTime: result.classRow.end_time,
+          reason: 'La clase fue cancelada por el equipo de coaching.',
+          returnedCredit: true
+        });
+        const studentSent = await sendEmailSafe(
+          reservation.email,
+          `Clase cancelada - ${result.classRow.type}`,
+          studentHtml
+        );
+        if (studentSent) {
+          notifiedStudents.push({
+            full_name: reservation.full_name,
+            email: reservation.email,
+            whatsapp_phone: reservation.whatsapp_phone
+          });
+        }
+
+        db.prepare(`
+          UPDATE reservations
+          SET cancellation_notified_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cancellation_notified_at END,
+              cancellation_notified_to_student = ?,
+              cancellation_notified_to_business = 0,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(studentSent ? 1 : 0, studentSent ? 1 : 0, reservation.id);
+      }
+
+      const businessSubject = `Cancelación de clase por coach - ${result.classRow.type}`;
+      const businessHtml = buildBusinessCancellationEmail({
+        title: 'Clase cancelada por coach',
+        className: result.classRow.type,
+        date: result.classRow.date,
+        startTime: result.classRow.start_time,
+        endTime: result.classRow.end_time,
+        reason: 'Cancelación manual desde panel del coach',
+        source: 'Coach',
+        notifiedStudents
+      });
+      const businessSent = await sendEmailSafe(result.businessEmail, businessSubject, businessHtml);
+
+      db.prepare(`
+        UPDATE reservations
+        SET cancellation_notified_to_business = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE class_id = ?
+          AND status = 'cancelled'
+          AND deleted_at IS NULL
+      `).run(businessSent ? 1 : 0, req.params.id);
+
+      db.prepare(`
+        UPDATE classes
+        SET cancellation_notified_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE cancellation_notified_at END
+        WHERE id = ?
+      `).run(result.reservations.length > 0 ? 1 : 0, req.params.id);
+
+      res.json({
+        success: true,
+        reservationsNotified: result.reservations.length
+      });
+    } catch (error: any) {
+      if (error.message === 'CLASS_NOT_FOUND') {
+        return res.status(404).json({ error: 'Clase no encontrada.' });
+      }
+      res.status(500).json({ error: 'No se pudo cancelar la clase.', details: error.message });
     }
   });
 
@@ -2680,13 +3710,25 @@ async function startServer() {
       if (setting_value == null || String(setting_value).trim() === '') {
       return res.status(400).json({ error: 'El valor del ajuste es obligatorio.' });
       }
+      const value = String(setting_value).trim();
+      if (key === 'cancellation_limit_hours') {
+        const hours = Number(value);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
+          return res.status(400).json({ error: 'El límite de cancelación debe ser un número entre 1 y 168.' });
+        }
+      }
+      if (key === 'cancellation_cutoff_morning' || key === 'cancellation_deadline_evening') {
+        if (!/^\d{2}:\d{2}$/.test(value)) {
+          return res.status(400).json({ error: 'El formato de hora debe ser HH:MM.' });
+        }
+      }
 
       db.prepare(`
         INSERT INTO system_settings (setting_key, setting_value, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(setting_key)
         DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
-      `).run(key, String(setting_value));
+      `).run(key, value);
 
       const row = db.prepare(`
         SELECT setting_key, setting_value, updated_at
@@ -2702,8 +3744,8 @@ async function startServer() {
   app.delete('/api/admin/settings/:key', (req, res) => {
     try {
       const key = req.params.key;
-      if (key === 'cancellation_limit_hours') {
-        return res.status(400).json({ error: 'No se puede eliminar el ajuste obligatorio de límite de cancelación.' });
+      if (['cancellation_limit_hours', 'cancellation_cutoff_morning', 'cancellation_deadline_evening'].includes(key)) {
+        return res.status(400).json({ error: 'No se puede eliminar un ajuste obligatorio del sistema.' });
       }
       db.prepare(`DELETE FROM system_settings WHERE setting_key = ?`).run(key);
       res.json({ success: true });

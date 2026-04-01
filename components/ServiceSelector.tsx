@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { ClassCategory } from '../types';
 import { slugifyClassType } from '../lib/routeHelpers.ts';
-import { api } from '../lib/api.ts';
+import { Profile } from '../types.ts';
+import { HomeCalendar } from './HomeCalendar.tsx';
+import { useAppData } from '../contexts/AppDataContext.tsx';
 
 const fallbackImages = [
   'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800',
@@ -11,22 +13,16 @@ const fallbackImages = [
   'https://images.unsplash.com/photo-1571731956672-f2b94d7dd0cb?auto=format&fit=crop&q=80&w=800'
 ];
 
-export const ServiceSelector: React.FC = () => {
-  const [categories, setCategories] = useState<ClassCategory[]>([]);
-  const [loading, setLoading] = useState(true);
+interface ServiceSelectorProps {
+  user: Profile;
+  onRefreshData?: () => Promise<void> | void;
+}
 
-  useEffect(() => {
-    const loadCategories = async () => {
-      setLoading(true);
-      try {
-        const rows = await api.getClassTypes();
-        setCategories(Array.isArray(rows) ? rows : []);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadCategories();
-  }, []);
+export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefreshData }) => {
+  const location = useLocation();
+  const { classTypes, classTypesLoading } = useAppData();
+  const showHomeCalendar = location.pathname === '/';
+  const categories = (classTypes || []) as ClassCategory[];
 
   return (
     <div className="py-12 sm:py-16 md:py-24 bg-white animate-in fade-in duration-1000">
@@ -41,7 +37,20 @@ export const ServiceSelector: React.FC = () => {
           </p>
         </div>
 
-        {loading ? (
+        {showHomeCalendar && <HomeCalendar user={user} onRefreshData={onRefreshData} />}
+
+        <div className="mt-12 sm:mt-14">
+          <div className="max-w-3xl mx-auto text-center mb-8 space-y-3">
+            <h2 className="text-3xl sm:text-4xl font-bebas tracking-tighter text-zinc-900 leading-none">
+              TIPOS DE <span className="text-brand">ENTRENAMIENTO</span>
+            </h2>
+            <p className="text-zinc-400 font-medium text-sm sm:text-base leading-relaxed px-4">
+              También puedes navegar por categoría para ir directo a tu disciplina.
+            </p>
+          </div>
+        </div>
+
+        {classTypesLoading ? (
           <div className="py-20 text-center">
             <i className="fas fa-circle-notch text-3xl text-brand animate-spin"></i>
             <p className="text-zinc-400 text-xs font-black uppercase tracking-[0.3em] mt-4">Cargando categorias</p>

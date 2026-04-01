@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api, logger } from '../lib/api.ts';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 interface AnalyticsData {
   mostReservedClass: { type: string; count: number } | null;
@@ -24,7 +25,7 @@ export const CoachAnalytics: React.FC = () => {
       const data = await api.admin.getCoachAnalytics();
       setAnalytics(data);
     } catch (err: any) {
-      setError(err.message);
+      setError(getFriendlyErrorMessage(err, 'No pudimos cargar las analíticas. Intenta de nuevo.'));
       logger.error('Error fetching analytics', err);
     } finally {
       setLoading(false);

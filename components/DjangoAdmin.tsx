@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom';
 import { api, logger } from '../lib/api.ts';
 import { EmailConfig } from './EmailConfig.tsx';
 import { useNotifications } from './NotificationSystem.tsx';
+import { useAppData } from '../contexts/AppDataContext.tsx';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 type ModelType = 'profiles' | 'classes' | 'reservations' | 'settings';
 
 export const DjangoAdmin: React.FC = () => {
   const { addNotification } = useNotifications();
+  const { refreshSettings } = useAppData();
   const [currentModel, setCurrentModel] = useState<ModelType>('profiles');
   const [data, setData] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
@@ -17,6 +20,8 @@ export const DjangoAdmin: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [showEmailConfig, setShowEmailConfig] = useState(false);
   const [cancellationLimitHours, setCancellationLimitHours] = useState('8');
+  const [cancellationCutoffMorning, setCancellationCutoffMorning] = useState('08:00');
+  const [cancellationDeadlineEvening, setCancellationDeadlineEvening] = useState('22:00');
   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
@@ -48,10 +53,14 @@ export const DjangoAdmin: React.FC = () => {
         result = await api.admin.getSettings();
         const limitSetting = result.find((row: any) => row.setting_key === 'cancellation_limit_hours');
         if (limitSetting?.setting_value) setCancellationLimitHours(String(limitSetting.setting_value));
+        const cutoffSetting = result.find((row: any) => row.setting_key === 'cancellation_cutoff_morning');
+        if (cutoffSetting?.setting_value) setCancellationCutoffMorning(String(cutoffSetting.setting_value));
+        const eveningSetting = result.find((row: any) => row.setting_key === 'cancellation_deadline_evening');
+        if (eveningSetting?.setting_value) setCancellationDeadlineEvening(String(eveningSetting.setting_value));
       }
       setData(result);
     } catch (err: any) {
-      setError(err.message);
+      setError(getFriendlyErrorMessage(err, 'No se pudieron cargar los datos de administración.'));
       logger.error(`Error fetching ${currentModel}`, err);
     } finally {
       setLoading(false);
@@ -64,7 +73,10 @@ export const DjangoAdmin: React.FC = () => {
       if (currentModel === 'profiles') await api.admin.deleteProfile(id);
       if (currentModel === 'classes') await api.admin.deleteClass(id);
       if (currentModel === 'reservations') await api.admin.deleteReservation(id);
-      if (currentModel === 'settings') await api.admin.deleteSetting(id);
+      if (currentModel === 'settings') {
+        await api.admin.deleteSetting(id);
+        await refreshSettings();
+      }
       addNotification({
         type: 'success',
         title: 'Eliminado',
@@ -79,6 +91,7 @@ export const DjangoAdmin: React.FC = () => {
         const parsed = JSON.parse(err.message);
         if (parsed?.message) message = parsed.message;
       } catch {}
+      message = getFriendlyErrorMessage(err, message);
       addNotification({
         type: 'error',
         title: 'Error de eliminación',
@@ -99,7 +112,7 @@ export const DjangoAdmin: React.FC = () => {
       await api.admin.changePassword(userId, newPassword);
       addNotification({ type: 'success', title: 'Contraseña actualizada', message: 'Cambio aplicado.', duration: 3500 });
     } catch (err: any) {
-      addNotification({ type: 'error', title: 'Error', message: err.message, duration: 5000 });
+      addNotification({ type: 'error', title: 'Error', message: getFriendlyErrorMessage(err, 'No se pudo actualizar la contraseña.'), duration: 5000 });
     }
   };
 
@@ -118,7 +131,7 @@ export const DjangoAdmin: React.FC = () => {
       fetchModelData();
       fetchStats();
     } catch (err: any) {
-      addNotification({ type: 'error', title: 'Error al guardar', message: err.message, duration: 6000 });
+      addNotification({ type: 'error', title: 'Error al guardar', message: getFriendlyErrorMessage(err, 'No se pudieron guardar los cambios.'), duration: 6000 });
     }
   };
 
@@ -133,13 +146,27 @@ export const DjangoAdmin: React.FC = () => {
       });
       return;
     }
+    if (!/^\d{2}:\d{2}$/.test(cancellationCutoffMorning) || !/^\d{2}:\d{2}$/.test(cancellationDeadlineEvening)) {
+      addNotification({
+        type: 'warning',
+        title: 'Formato inválido',
+        message: 'Usa formato HH:MM para hora de corte matutina y hora límite nocturna.',
+        duration: 4000
+      });
+      return;
+    }
     setSavingSettings(true);
     try {
-      await api.admin.updateSetting('cancellation_limit_hours', hours);
+      await Promise.all([
+        api.admin.updateSetting('cancellation_limit_hours', hours),
+        api.admin.updateSetting('cancellation_cutoff_morning', cancellationCutoffMorning),
+        api.admin.updateSetting('cancellation_deadline_evening', cancellationDeadlineEvening)
+      ]);
+      await refreshSettings();
       addNotification({
         type: 'success',
         title: 'Ajuste guardado',
-        message: 'Límite de cancelación actualizado.',
+        message: 'Política de cancelación inteligente actualizada.',
         duration: 3500
       });
       fetchModelData();
@@ -147,7 +174,7 @@ export const DjangoAdmin: React.FC = () => {
       addNotification({
         type: 'error',
         title: 'Error guardando ajuste',
-        message: err.message || 'No se pudo actualizar el ajuste.',
+        message: getFriendlyErrorMessage(err, 'No se pudo actualizar el ajuste.'),
         duration: 6000
       });
     } finally {
@@ -155,10 +182,11 @@ export const DjangoAdmin: React.FC = () => {
     }
   };
 
+
   if (loading && data.length === 0) return <div className="p-10 font-mono">Cargando administración...</div>;
 
   return (
-    <div className="min-h-screen bg-[#f8f8f8] font-sans text-[#333]">
+    <div className="min-h-screen bg-[#f8f8f8] font-sans text-[#333] overflow-x-hidden [&_button]:min-h-[44px] [&_input]:min-h-[44px] [&_select]:min-h-[44px]">
       <header className="bg-[#417690] text-white p-3 sm:p-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-md">
         <h1 className="text-lg sm:text-xl font-bold tracking-tight">Administración de Focus Fitness</h1>
         <div className="text-[10px] sm:text-xs uppercase font-bold flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
@@ -234,18 +262,46 @@ export const DjangoAdmin: React.FC = () => {
                     </label>
                     <input
                       type="number"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      step={1}
                       min={0}
                       max={168}
                       value={cancellationLimitHours}
                       onChange={(e) => setCancellationLimitHours(e.target.value)}
-                      className="w-full border p-2 text-sm"
+                      className="w-full border p-2 text-sm min-h-[44px]"
                     />
+                    <p className="mt-1 text-[11px] text-[#666]">Horas base para calcular el límite normal.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-[#666] uppercase mb-2">
+                      Hora de corte matutina
+                    </label>
+                    <input
+                      type="time"
+                      value={cancellationCutoffMorning}
+                      onChange={(e) => setCancellationCutoffMorning(e.target.value)}
+                      className="w-full border p-2 text-sm min-h-[44px]"
+                    />
+                    <p className="mt-1 text-[11px] text-[#666]">Si el límite cae antes de esta hora, se moverá al día anterior por la noche.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-[#666] uppercase mb-2">
+                      Hora límite nocturna (día anterior)
+                    </label>
+                    <input
+                      type="time"
+                      value={cancellationDeadlineEvening}
+                      onChange={(e) => setCancellationDeadlineEvening(e.target.value)}
+                      className="w-full border p-2 text-sm min-h-[44px]"
+                    />
+                    <p className="mt-1 text-[11px] text-[#666]">Hora final permitida del día anterior para clases matutinas.</p>
                   </div>
                   <button
                     type="button"
                     onClick={handleSaveCancellationLimit}
                     disabled={savingSettings}
-                    className="bg-[#417690] text-white px-6 py-2 text-xs font-bold uppercase rounded hover:bg-[#2b5063] disabled:opacity-60"
+                    className="bg-[#417690] text-white px-6 py-3 text-xs font-bold uppercase rounded hover:bg-[#2b5063] disabled:opacity-60 min-h-[44px]"
                   >
                     {savingSettings ? 'Guardando...' : 'Guardar Ajuste'}
                   </button>
@@ -274,21 +330,21 @@ export const DjangoAdmin: React.FC = () => {
                         <>
                           <div>
                             <label className="block text-xs font-bold text-[#666] uppercase mb-1">Email</label>
-                            <input className="w-full border p-2 text-sm" value={editingItem?.email || ''} onChange={(e) => setEditingItem({ ...editingItem, email: e.target.value })} required />
+                            <input className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.email || ''} onChange={(e) => setEditingItem({ ...editingItem, email: e.target.value })} required />
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-[#666] uppercase mb-1">Password</label>
-                            <input type="password" className="w-full border p-2 text-sm" value={editingItem?.password || ''} onChange={(e) => setEditingItem({ ...editingItem, password: e.target.value })} placeholder="focus123" />
+                            <input type="password" className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.password || ''} onChange={(e) => setEditingItem({ ...editingItem, password: e.target.value })} placeholder="focus123" />
                           </div>
                         </>
                       )}
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Nombre Completo</label>
-                        <input className="w-full border p-2 text-sm" value={editingItem?.full_name || ''} onChange={(e) => setEditingItem({ ...editingItem, full_name: e.target.value })} required />
+                        <input className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.full_name || ''} onChange={(e) => setEditingItem({ ...editingItem, full_name: e.target.value })} required />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Rol</label>
-                        <select className="w-full border p-2 text-sm" value={editingItem.role} onChange={(e) => setEditingItem({ ...editingItem, role: e.target.value })}>
+                        <select className="w-full border p-2 text-sm min-h-[44px]" value={editingItem.role} onChange={(e) => setEditingItem({ ...editingItem, role: e.target.value })}>
                           <option value="student">Student</option>
                           <option value="coach">Coach</option>
                           <option value="admin">Admin</option>
@@ -296,7 +352,7 @@ export const DjangoAdmin: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Créditos</label>
-                        <input type="number" className="w-full border p-2 text-sm" value={editingItem.credits_remaining} onChange={(e) => setEditingItem({ ...editingItem, credits_remaining: parseInt(e.target.value || '0', 10) })} />
+                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={editingItem.credits_remaining} onChange={(e) => setEditingItem({ ...editingItem, credits_remaining: parseInt(e.target.value || '0', 10) })} />
                       </div>
                     </>
                   )}
@@ -305,30 +361,30 @@ export const DjangoAdmin: React.FC = () => {
                     <>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Tipo</label>
-                        <input className="w-full border p-2 text-sm" value={editingItem?.type || ''} onChange={(e) => setEditingItem({ ...editingItem, type: e.target.value })} />
+                        <input className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.type || ''} onChange={(e) => setEditingItem({ ...editingItem, type: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Fecha (YYYY-MM-DD)</label>
-                        <input className="w-full border p-2 text-sm" value={editingItem?.date || ''} onChange={(e) => setEditingItem({ ...editingItem, date: e.target.value })} />
+                        <input type="date" className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.date || ''} onChange={(e) => setEditingItem({ ...editingItem, date: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Inicio (HH:MM)</label>
-                        <input className="w-full border p-2 text-sm" value={editingItem?.start_time || ''} onChange={(e) => setEditingItem({ ...editingItem, start_time: e.target.value })} />
+                        <input type="time" className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.start_time || ''} onChange={(e) => setEditingItem({ ...editingItem, start_time: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Fin (HH:MM)</label>
-                        <input className="w-full border p-2 text-sm" value={editingItem?.end_time || ''} onChange={(e) => setEditingItem({ ...editingItem, end_time: e.target.value })} />
+                        <input type="time" className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.end_time || ''} onChange={(e) => setEditingItem({ ...editingItem, end_time: e.target.value })} />
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Capacidad</label>
-                        <input type="number" className="w-full border p-2 text-sm" value={editingItem?.capacity || 8} onChange={(e) => setEditingItem({ ...editingItem, capacity: parseInt(e.target.value || '8', 10) })} />
+                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.capacity || 8} onChange={(e) => setEditingItem({ ...editingItem, capacity: parseInt(e.target.value || '8', 10) })} />
                       </div>
                     </>
                   )}
 
                   <div className="pt-4 flex space-x-4">
-                    <button type="submit" className="bg-[#417690] text-white px-6 py-2 text-xs font-bold uppercase rounded">Grabar</button>
-                    <button type="button" onClick={() => { setEditingItem(null); setIsAdding(false); }} className="bg-[#ccc] text-white px-6 py-2 text-xs font-bold uppercase rounded">Cancelar</button>
+                    <button type="submit" className="bg-[#417690] text-white px-6 py-2 text-xs font-bold uppercase rounded min-h-[44px]">Grabar</button>
+                    <button type="button" onClick={() => { setEditingItem(null); setIsAdding(false); }} className="bg-[#ccc] text-white px-6 py-2 text-xs font-bold uppercase rounded min-h-[44px]">Cancelar</button>
                   </div>
                 </form>
               </div>
@@ -352,7 +408,8 @@ export const DjangoAdmin: React.FC = () => {
 
                 {error && <div className="p-4 bg-red-50 text-red-600 text-xs font-bold">{error}</div>}
 
-                <table className="w-full text-left text-xs">
+                <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[760px]">
                   <thead>
                     <tr className="bg-[#f0f0f0] border-b border-[#ddd]">
                       <th className="p-3">ID</th>
@@ -430,6 +487,7 @@ export const DjangoAdmin: React.FC = () => {
                     ))}
                   </tbody>
                 </table>
+                </div>
 
                 <div className="p-3 bg-[#f0f0f0] text-[10px] text-[#666] font-bold uppercase">
                   {data.length} {currentModel}

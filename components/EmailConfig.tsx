@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 interface EmailConfig {
   provider: 'console' | 'smtp' | 'sendgrid' | 'ses';
@@ -40,8 +41,8 @@ export const EmailConfig: React.FC = () => {
         if (data && data.provider !== 'console') {
           setConfig(data);
         }
-      } catch (error) {
-        console.log('No se pudo cargar configuración guardada');
+      } catch {
+        // Evita ruido en UI cuando no hay configuración previa.
       }
     };
     
@@ -61,10 +62,10 @@ export const EmailConfig: React.FC = () => {
       if (data.success) {
         setMessage('✅ Configuración guardada exitosamente');
       } else {
-        setMessage(`❌ Error: ${data.error}`);
+        setMessage(`❌ ${getFriendlyErrorMessage(data, 'No pudimos guardar la configuración de correo.')}`);
       }
-    } catch (error) {
-      setMessage('❌ Error de conexión al guardar configuración');
+    } catch (error: any) {
+      setMessage(`❌ ${getFriendlyErrorMessage(error, 'Sin conexión. Verifica tu internet e intenta de nuevo.')}`);
     }
     
     setTimeout(() => setMessage(''), 3000);
@@ -92,10 +93,10 @@ export const EmailConfig: React.FC = () => {
       if (data.success) {
         setMessage('✅ Email de prueba enviado exitosamente');
       } else {
-        setMessage(`❌ Error: ${data.error}`);
+        setMessage(`❌ ${getFriendlyErrorMessage(data, 'No pudimos enviar el correo de prueba.')}`);
       }
-    } catch (error) {
-      setMessage('❌ Error de conexión al probar email');
+    } catch (error: any) {
+      setMessage(`❌ ${getFriendlyErrorMessage(error, 'Sin conexión. Verifica tu internet e intenta de nuevo.')}`);
     } finally {
       setLoading(false);
     }
@@ -143,7 +144,7 @@ export const EmailConfig: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white p-3 sm:p-4 lg:p-6">
+    <div className="min-h-screen bg-white p-3 sm:p-4 lg:p-6 overflow-x-hidden [&_button]:min-h-[44px] [&_input]:min-h-[44px] [&_select]:min-h-[44px]">
       <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="text-center space-y-3 sm:space-y-4">
@@ -237,6 +238,9 @@ export const EmailConfig: React.FC = () => {
                       <label className="block text-xs font-bold text-zinc-600 uppercase mb-2">Puerto</label>
                       <input
                         type="number"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        step={1}
                         placeholder="587"
                         value={config.smtp?.port || ''}
                         onChange={(e) => setConfig({

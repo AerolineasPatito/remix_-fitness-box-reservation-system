@@ -70,8 +70,8 @@ describe('POST /api/reservations', () => {
 
     try {
       db.prepare(`
-        INSERT INTO profiles (id, email, full_name, password_hash, role, credits_remaining, total_attended, email_verified, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'student', 3, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO profiles (id, email, full_name, password_hash, role, credits_remaining, total_attended, email_verified, policy_accepted_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'student', 3, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).run(userId, `${userId}@test.local`, 'Test Student', 'hash');
 
       db.prepare(`

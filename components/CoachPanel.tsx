@@ -4,13 +4,16 @@ import { api, logger } from '../lib/api.ts';
 import { useNotifications } from './NotificationSystem.tsx';
 import { CoachAnalytics } from './CoachAnalytics.tsx';
 import { CoachBusinessPanel } from './CoachBusinessPanel.tsx';
+import { ClassCalendar } from './ClassCalendar.tsx';
+import { useAppData } from '../contexts/AppDataContext.tsx';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 interface CoachPanelProps {
   user: Profile;
   instances: ClassInstance[];
   availability: AvailabilityState;
-  onRefresh: () => void;
-  onRefreshStudents: () => void;
+  onRefresh: () => Promise<void> | void;
+  onRefreshStudents: () => Promise<void> | void;
 }
 
 declare var flatpickr: any;
@@ -58,6 +61,7 @@ const getColorSwatchClass = (theme?: string) => {
 
 export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availability, onRefresh, onRefreshStudents }) => {
   const { addNotification, removeNotification } = useNotifications();
+  const { classTypes: sharedClassTypes, classTypesLoading, refreshClassTypes, refreshAvailability, refreshClasses } = useAppData();
   const [activeTab, setActiveTab] = useState<'sessions' | 'students' | 'analytics' | 'business'>('sessions');
   const [students, setStudents] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,8 +72,10 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [yearLoading, setYearLoading] = useState(false);
   const [yearInstances, setYearInstances] = useState<ClassInstance[]>([]);
+  const [calendarYearInstances, setCalendarYearInstances] = useState<ClassInstance[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [selectedCalendarClass, setSelectedCalendarClass] = useState<ClassInstance | null>(null);
   const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string; description?: string; duration?: number }>>([]);
-  const [classTypesLoading, setClassTypesLoading] = useState(false);
   const [showTypeManager, setShowTypeManager] = useState(false);
   const [editingClassTypeId, setEditingClassTypeId] = useState<string | null>(null);
   const [classTypeForm, setClassTypeForm] = useState({
@@ -83,13 +89,22 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   
   const datePickerRef = useRef<HTMLInputElement>(null);
   const startTimePickerRef = useRef<HTMLInputElement>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   const [formData, setFormData] = useState({
     type: ClassType.FUNCTIONAL,
     classTypeId: '',
     date: new Date().toISOString().split('T')[0], // Hoy por defecto
     startTime: '07:00',
-    endTime: '08:00'
+    endTime: '08:00',
+    minCapacity: 1,
+    maxCapacity: 8
+  });
+  const [recurrenceConfig, setRecurrenceConfig] = useState({
+    enabled: false,
+    recurrenceType: 'weekly' as 'daily' | 'weekly' | 'custom',
+    weeks: 4,
+    daysOfWeek: [] as number[]
   });
 
   const normalizeInstances = (data: any[]): ClassInstance[] =>
@@ -97,28 +112,23 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       ...d,
       startTime: (d.start_time || d.startTime || '').substring(0, 5),
       endTime: (d.end_time || d.endTime || '').substring(0, 5),
-      imageUrl: d.image_url || d.imageUrl || ''
+      imageUrl: d.image_url || d.imageUrl || '',
+      status: d.status,
+      real_time_status: d.real_time_status,
+      min_capacity: Number(d.min_capacity || d.minCapacity || 1),
+      max_capacity: Number(d.max_capacity || d.maxCapacity || d.capacity || 0),
+      enrolled_count: Number(d.enrolled_count || 0),
+      enrolled_students: Array.isArray(d.enrolled_students)
+        ? d.enrolled_students
+        : typeof d.enrolled_students === 'string'
+          ? d.enrolled_students.split('||').filter(Boolean)
+          : []
     }));
 
-  const fetchClassTypes = async () => {
-    setClassTypesLoading(true);
-    try {
-      const rows = await api.getClassTypes();
-      const safeRows = Array.isArray(rows) ? rows : [];
-      setClassTypes(safeRows);
-      if (!formData.classTypeId && safeRows.length > 0) {
-        setFormData((prev) => ({
-          ...prev,
-          classTypeId: safeRows[0].id,
-          type: safeRows[0].name as ClassType
-        }));
-      }
-    } catch (err: any) {
-      logger.error('Error loading class types', err);
-    } finally {
-      setClassTypesLoading(false);
-    }
-  };
+  useEffect(() => {
+    const safeRows = Array.isArray(sharedClassTypes) ? sharedClassTypes : [];
+    setClassTypes(safeRows as any[]);
+  }, [sharedClassTypes]);
 
   // Validación de horario conflictivo en tiempo real
   const hasScheduleConflict = useMemo(() => {
@@ -135,20 +145,23 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     );
   }, [instances, formData.date, formData.startTime]);
 
-  // Add debug for formData changes
-  useEffect(() => {
-    console.log('FormData changed:', formData);
-  }, [formData]);
-
   useEffect(() => {
     if (activeTab === 'students') fetchStudents();
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'sessions') {
-      fetchClassTypes();
+    if (activeTab === 'sessions') refreshClassTypes();
+  }, [activeTab, refreshClassTypes]);
+
+  useEffect(() => {
+    if (!formData.classTypeId && classTypes.length > 0) {
+      setFormData((prev) => ({
+        ...prev,
+        classTypeId: classTypes[0].id,
+        type: classTypes[0].name as ClassType
+      }));
     }
-  }, [activeTab]);
+  }, [classTypes, formData.classTypeId]);
 
   useEffect(() => {
     const yearsRaw = (instances || [])
@@ -165,39 +178,77 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     });
   }, [instances]);
 
+  const loadYearClasses = async (year: number) => {
+    setYearLoading(true);
+    try {
+      const data = await api.getClasses(year);
+      setYearInstances(normalizeInstances(data || []));
+    } catch (err: any) {
+      logger.error('Error loading classes by year', err);
+      setYearInstances([]);
+    } finally {
+      setYearLoading(false);
+    }
+  };
+
+  const loadYearCalendarClasses = async (year: number) => {
+    setCalendarLoading(true);
+    try {
+      const data = await api.getClassesCalendar({ year, includeRoster: true });
+      setCalendarYearInstances(normalizeInstances(data || []));
+    } catch (err: any) {
+      logger.error('Error loading calendar classes by year', err);
+      setCalendarYearInstances([]);
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const refreshCoachViews = async () => {
+    await Promise.resolve(onRefresh());
+    if (activeTab === 'sessions') {
+      await Promise.all([refreshClassTypes(), refreshClasses(), refreshAvailability()]);
+      if (selectedYear) {
+        await loadYearClasses(selectedYear);
+        await loadYearCalendarClasses(selectedYear);
+      }
+    }
+    if (activeTab === 'students') {
+      await Promise.resolve(onRefreshStudents());
+      await fetchStudents();
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== 'sessions') return;
     if (!selectedYear) return;
-
-    let cancelled = false;
-    const loadYearClasses = async () => {
-      setYearLoading(true);
-      try {
-        const data = await api.getClasses(selectedYear);
-        if (!cancelled) {
-          setYearInstances(normalizeInstances(data || []));
-        }
-      } catch (err: any) {
-        logger.error('Error loading classes by year', err);
-        if (!cancelled) {
-          setYearInstances([]);
-        }
-      } finally {
-        if (!cancelled) setYearLoading(false);
-      }
-    };
-
-    loadYearClasses();
-    return () => {
-      cancelled = true;
-    };
+    loadYearClasses(selectedYear);
+    loadYearCalendarClasses(selectedYear);
   }, [activeTab, selectedYear]);
 
   useEffect(() => {
+    if (activeTab !== 'sessions' || !selectedYear) return;
+    const interval = setInterval(() => {
+      loadYearCalendarClasses(selectedYear);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedYear]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const coarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches;
+    const touchPoints = (navigator as any)?.maxTouchPoints || 0;
+    setIsTouchDevice(Boolean(coarsePointer || touchPoints > 0));
+  }, []);
+
+  useEffect(() => {
     if (activeTab === 'sessions') {
+      if (isTouchDevice) return;
+      let datePickerInstance: any = null;
+      let timePickerInstance: any = null;
       if (datePickerRef.current) {
         // SIN RESTRICCIONES - Permitir cualquier fecha
-        const fp = flatpickr(datePickerRef.current, { 
+        datePickerInstance = flatpickr(datePickerRef.current, {
           locale: 'es', 
           defaultDate: formData.date, 
           dateFormat: 'Y-m-d',
@@ -205,7 +256,6 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
             const date = selectedDates[0];
             if (date) {
               const dateStr = date.toISOString().split('T')[0];
-              console.log('Date picker changed to:', dateStr);
               setFormData(prev => ({ 
                 ...prev, 
                 date: dateStr
@@ -214,12 +264,10 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           }
         });
         
-        // Forzar actualización del valor
-        fp.setDate(formData.date);
-        console.log('Flatpickr date set to:', formData.date);
+        datePickerInstance.setDate(formData.date);
       }
       if (startTimePickerRef.current) {
-        const timePicker = flatpickr(startTimePickerRef.current, {
+        timePickerInstance = flatpickr(startTimePickerRef.current, {
           locale: 'es',
           enableTime: true,
           noCalendar: true,
@@ -234,7 +282,6 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
               const end = new Date(date.getTime() + 60 * 60 * 1000);
               const end24 = end.toTimeString().slice(0, 5);
               
-              console.log('Time changed to:', start24);
               setFormData(prev => ({ 
                 ...prev, 
                 startTime: start24, 
@@ -244,12 +291,18 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           }
         });
         
-        // Forzar actualización del valor
-        timePicker.setDate(formData.startTime);
-        console.log('TimePicker set to:', formData.startTime);
+        timePickerInstance.setDate(formData.startTime);
       }
+      return () => {
+        if (datePickerInstance && typeof datePickerInstance.destroy === 'function') {
+          datePickerInstance.destroy();
+        }
+        if (timePickerInstance && typeof timePickerInstance.destroy === 'function') {
+          timePickerInstance.destroy();
+        }
+      };
     }
-  }, [activeTab, formData.date, formData.startTime]);
+  }, [activeTab, formData.date, formData.startTime, isTouchDevice]);
 
   const fetchStudents = async () => {
     setLoading(true);
@@ -276,7 +329,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         duration: Number(classTypeForm.duration || 60)
       });
       setClassTypeForm({ name: '', image_url: '', icon: 'fa-dumbbell', color_theme: 'brand', description: '', duration: 60 });
-      await fetchClassTypes();
+      await refreshClassTypes();
     } catch (err: any) {
       logger.error('Error creating class type', err);
     }
@@ -288,7 +341,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     try {
       await api.updateClassType(id, row);
       setEditingClassTypeId(null);
-      await fetchClassTypes();
+      await refreshClassTypes();
     } catch (err: any) {
       logger.error('Error updating class type', err);
     }
@@ -300,7 +353,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       if (formData.classTypeId === id) {
         setFormData((prev) => ({ ...prev, classTypeId: '' }));
       }
-      await fetchClassTypes();
+      await refreshClassTypes();
     } catch (err: any) {
       logger.error('Error deleting class type', err);
     }
@@ -308,6 +361,16 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
   const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (Number(formData.minCapacity) < 1 || Number(formData.maxCapacity) < 1 || Number(formData.minCapacity) > Number(formData.maxCapacity)) {
+      addNotification({
+        type: 'warning',
+        title: 'Capacidades inválidas',
+        message: 'El mínimo debe ser mayor a 0 y no puede ser mayor al máximo.',
+        duration: 5000
+      });
+      return;
+    }
     
     // VALIDACIÓN DE HORARIOS CONFLICTIVOS
     const conflictingClass = instances.find(inst => 
@@ -331,23 +394,6 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       return;
     }
     
-    // DEBUG LOGS - Verificar fechas y horas (SIN RESTRICCIONES)
-    const now = new Date();
-    const selectedDateTime = new Date(`${formData.date}T${formData.startTime}`);
-    
-    console.log('=== DEBUG CREACIÓN DE CLASE (SIN RESTRICCIONES) ===');
-    console.log('Fecha y hora actual:', now);
-    console.log('Fecha actual (ISO):', now.toISOString());
-    console.log('Fecha actual (local):', now.toLocaleString('es-ES'));
-    console.log('Form data date:', formData.date);
-    console.log('Form data startTime:', formData.startTime);
-    console.log('Selected DateTime:', selectedDateTime);
-    console.log('Selected DateTime (ISO):', selectedDateTime.toISOString());
-    console.log('Selected DateTime (local):', selectedDateTime.toLocaleString('es-ES'));
-    
-    // SIN VALIDACIONES - Permitir cualquier fecha y hora
-    console.log('SIN VALIDACIONES - Creando clase directamente...');
-    
     // Show confirmation notification
     const classDate = new Date(formData.date + 'T00:00:00').toLocaleDateString('es-ES', { 
       weekday: 'long', 
@@ -361,21 +407,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       hour12: true 
     });
     
-    console.log('Class date formatted:', classDate);
-    console.log('Class time formatted:', classTime);
-    console.log('Original formData.date:', formData.date);
-    
     // Store confirmation notification ID to close it later
     const notificationId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
     setConfirmationNotificationId(notificationId);
-    
-    console.log('Creating notification with ID:', notificationId);
-    console.log('Notification details being sent:', {
-      type: formData.type,
-      date: classDate,
-      time: classTime,
-      capacity: 8
-    });
     
     addNotification({
       id: notificationId,
@@ -383,10 +417,29 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       title: 'Confirmar Creación de Clase',
       message: `¿Estás seguro de que quieres crear esta clase?`,
       details: {
-        type: formData.type,
-        date: classDate,
-        time: classTime,
-        capacity: 8
+        clase: formData.type,
+        fecha: classDate,
+        horario: `${classTime} (${formData.startTime} - ${formData.endTime})`,
+        minimo_de_alumnos: formData.minCapacity,
+        maximo_de_alumnos: formData.maxCapacity,
+        tipo_de_recurrencia: recurrenceConfig.enabled
+          ? (recurrenceConfig.recurrenceType === 'daily'
+              ? 'Diaria'
+              : recurrenceConfig.recurrenceType === 'weekly'
+                ? 'Semanal'
+                : 'Personalizada')
+          : '',
+        duracion_de_la_programacion_semanas: recurrenceConfig.enabled ? recurrenceConfig.weeks : '',
+        dias_de_repeticion: recurrenceConfig.enabled
+          ? (recurrenceConfig.recurrenceType === 'daily'
+              ? 'Todos los días'
+              : recurrenceConfig.daysOfWeek.length > 0
+                ? recurrenceConfig.daysOfWeek
+                    .sort((a, b) => a - b)
+                    .map((d) => ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][d])
+                    .join(', ')
+                : ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][new Date(`${formData.date}T00:00:00`).getDay()])
+          : ''
       },
       suggestions: [
         'Verifica que la fecha y hora sean correctas',
@@ -397,20 +450,8 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         {
           label: 'Confirmar y Crear',
           onClick: () => {
-            console.log('=== USUARIO CONFIRMÓ ===');
-            console.log('Notification ID to close:', notificationId);
-            console.log('Current confirmationNotificationId state:', confirmationNotificationId);
-            
-            // Intentar cerrar la notificación
-            try {
-              removeNotification(notificationId);
-              console.log('removeNotification called successfully');
-              setConfirmationNotificationId(null);
-              console.log('confirmationNotificationId set to null');
-            } catch (error) {
-              console.error('Error closing notification:', error);
-            }
-            
+            removeNotification(notificationId);
+            setConfirmationNotificationId(null);
             createClass();
           },
           variant: 'primary'
@@ -418,21 +459,14 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         {
           label: 'Cancelar',
           onClick: () => {
-            console.log('=== USUARIO CANCELÓ ===');
-            console.log('Notification ID to close:', notificationId);
-            
-            try {
-              removeNotification(notificationId);
-              setConfirmationNotificationId(null);
-              addNotification({
-                type: 'info',
-                title: 'Creación Cancelada',
-                message: 'La creación de la clase ha sido cancelada.',
-                duration: 4000
-              });
-            } catch (error) {
-              console.error('Error closing notification:', error);
-            }
+            removeNotification(notificationId);
+            setConfirmationNotificationId(null);
+            addNotification({
+              type: 'info',
+              title: 'Creación cancelada',
+              message: 'No se guardaron cambios en la cartelera.',
+              duration: 4000
+            });
           },
           variant: 'secondary'
         }
@@ -442,30 +476,38 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
   const createClass = async () => {
     setLoading(true);
-    
-    console.log('=== CREANDO CLASE EN SERVIDOR ===');
-    console.log('FormData a enviar:', {
-      type: formData.type,
-      class_type_id: formData.classTypeId,
-      date: formData.date,
-      start_time: formData.startTime,
-      end_time: formData.endTime,
-      capacity: 8,
-      created_by: user.id
-    });
-    
+
     try {
-      await api.createClass({
-        type: formData.type,
-        class_type_id: formData.classTypeId,
-        date: formData.date,
-        start_time: formData.startTime,
-        end_time: formData.endTime,
-        capacity: 8,
-        created_by: user.id
-      });
-      
-      console.log('CLASE CREADA EXITOSAMENTE');
+      if (recurrenceConfig.enabled) {
+        await api.createRecurringClasses({
+          class_type_id: formData.classTypeId,
+          start_date: formData.date,
+          start_time: formData.startTime,
+          end_time: formData.endTime,
+          min_capacity: Number(formData.minCapacity),
+          max_capacity: Number(formData.maxCapacity),
+          created_by: user.id,
+          recurrence_type: recurrenceConfig.recurrenceType,
+          weeks: Number(recurrenceConfig.weeks),
+          days_of_week: recurrenceConfig.recurrenceType === 'custom'
+            ? recurrenceConfig.daysOfWeek
+            : recurrenceConfig.recurrenceType === 'weekly'
+              ? (recurrenceConfig.daysOfWeek.length ? recurrenceConfig.daysOfWeek : [new Date(`${formData.date}T00:00:00`).getDay()])
+              : []
+        });
+      } else {
+        await api.createClass({
+          type: formData.type,
+          class_type_id: formData.classTypeId,
+          date: formData.date,
+          start_time: formData.startTime,
+          end_time: formData.endTime,
+          min_capacity: Number(formData.minCapacity),
+          max_capacity: Number(formData.maxCapacity),
+          capacity: Number(formData.maxCapacity),
+          created_by: user.id
+        });
+      }
       
       // Reset form
       setFormData({
@@ -473,15 +515,25 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         classTypeId: classTypes[0]?.id || '',
         date: new Date().toISOString().split('T')[0],
         startTime: '07:00',
-        endTime: '08:00'
+        endTime: '08:00',
+        minCapacity: 1,
+        maxCapacity: 8
+      });
+      setRecurrenceConfig({
+        enabled: false,
+        recurrenceType: 'weekly',
+        weeks: 4,
+        daysOfWeek: []
       });
       
-      onRefresh();
+      await refreshCoachViews();
       
       addNotification({
         type: 'success',
         title: 'Clase Creada Exitosamente',
-        message: `La clase de ${formData.type} ha sido creada y publicada.`,
+        message: recurrenceConfig.enabled
+          ? `Se publicó la programación recurrente de ${formData.type}.`
+          : `La clase de ${formData.type} ha sido creada y publicada.`,
         details: {
           date: new Date(formData.date).toLocaleDateString('es-ES'),
           time: formData.startTime
@@ -490,13 +542,11 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       });
       
     } catch (err: any) {
-      console.error('ERROR CREANDO CLASE:', err);
       logger.error('Error adding class', err);
       addNotification({
         type: 'error',
-        title: 'Error al Crear Clase',
-        message: 'No se pudo crear la clase. Por favor intenta nuevamente.',
-        details: { technical: err.message },
+        title: 'No pudimos crear la clase',
+        message: getFriendlyErrorMessage(err, 'Intenta de nuevo en unos segundos.'),
         duration: 6000
       });
     } finally {
@@ -510,12 +560,8 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       await api.cancelClass(deletingId, user.id);
       const removedId = deletingId;
       setDeletingId(null);
-      onRefresh();
+      await refreshCoachViews();
       setYearInstances((prev) => prev.filter((inst) => inst.id !== removedId));
-      if (selectedYear) {
-        const data = await api.getClasses(selectedYear);
-        setYearInstances(normalizeInstances(data || []));
-      }
       
       addNotification({
         type: 'success',
@@ -538,18 +584,23 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     setUpdatingStudentId(`${studentId}_${amount}`);
     try {
       await api.coach.adjustStudentCredits(studentId, { amount, reason: 'Ajuste manual' });
-      onRefreshStudents();
-      fetchStudents();
+      await Promise.resolve(onRefreshStudents());
+      await fetchStudents();
     } catch (err) {
       logger.error('Error actualizando créditos', err);
-      alert('Error al actualizar créditos.');
+      addNotification({
+        type: 'error',
+        title: 'No pudimos actualizar créditos',
+        message: getFriendlyErrorMessage(err, 'Intenta de nuevo en unos segundos.'),
+        duration: 4500
+      });
     } finally {
       setUpdatingStudentId(null);
     }
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen bg-zinc-50 overflow-x-hidden [&_button]:min-h-[44px] [&_input]:min-h-[44px] [&_select]:min-h-[44px]">
       {/* Header Sticky */}
       <div className="sticky top-0 z-40 bg-white border-b border-zinc-100 p-4 sm:p-6 lg:p-8 backdrop-blur-xl bg-white/95">
         <div className="max-w-7xl mx-auto">
@@ -634,10 +685,52 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           </div>
         )}
 
+        {selectedCalendarClass && (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center p-4">
+            <button
+              type="button"
+              className="absolute inset-0 bg-zinc-900/75"
+              onClick={() => setSelectedCalendarClass(null)}
+            />
+            <div className="relative z-10 w-full max-w-2xl bg-white rounded-3xl border border-zinc-100 p-6 sm:p-8 shadow-2xl">
+              <h3 className="text-3xl font-bebas tracking-wide uppercase italic text-zinc-900">Detalle de Clase</h3>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-zinc-600">
+                <p><span className="font-black text-zinc-900">Clase:</span> {selectedCalendarClass.type}</p>
+                <p><span className="font-black text-zinc-900">Fecha:</span> {new Date(`${selectedCalendarClass.date}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                <p><span className="font-black text-zinc-900">Horario:</span> {selectedCalendarClass.startTime} - {selectedCalendarClass.endTime}</p>
+                <p><span className="font-black text-zinc-900">Cupo:</span> {Number(availability[selectedCalendarClass.id] || selectedCalendarClass.enrolled_count || 0)}/{Number(selectedCalendarClass.max_capacity || selectedCalendarClass.capacity || 0)}</p>
+                <p><span className="font-black text-zinc-900">Mínimo requerido:</span> {Number(selectedCalendarClass.min_capacity || 1)}</p>
+                <p><span className="font-black text-zinc-900">Estado:</span> {selectedCalendarClass.status || selectedCalendarClass.real_time_status || 'scheduled'}</p>
+              </div>
+              <div className="mt-5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Alumnos inscritos</p>
+                {(selectedCalendarClass.enrolled_students || []).length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(selectedCalendarClass.enrolled_students || []).map((studentName, idx) => (
+                      <span key={`${studentName}_${idx}`} className="px-3 py-2 rounded-xl bg-zinc-100 text-zinc-700 text-xs font-semibold">
+                        {studentName}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-zinc-400">Aún no hay alumnos inscritos para esta clase.</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCalendarClass(null)}
+                className="mt-6 w-full py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
+
         {showTypeManager && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
             <div className="absolute inset-0 bg-zinc-900/80" onClick={() => setShowTypeManager(false)}></div>
-            <div className="relative bg-white w-full max-w-3xl rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="relative bg-white w-full max-w-3xl rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 max-h-[92vh] overflow-y-auto">
               <div className="flex items-center justify-between">
                 <h3 className="text-2xl font-bebas tracking-wide uppercase italic">Gestionar Tipos de Entrenamiento</h3>
                 <button
@@ -725,6 +818,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       <input
                         type="number"
                         min={15}
+                        step={1}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         value={classTypeForm.duration}
                         onChange={(e) => setClassTypeForm((prev) => ({ ...prev, duration: Number(e.target.value || 60) }))}
                         className="ml-3 flex-1 bg-white border border-zinc-200 rounded-lg p-2 text-sm font-semibold"
@@ -779,8 +875,8 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
               <div className="space-y-2 max-h-64 overflow-auto">
                 {classTypes.map((row) => (
-                  <div key={row.id} className="flex items-center justify-between border border-zinc-100 rounded-xl p-3">
-                    <div className="flex items-center gap-3">
+                  <div key={row.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border border-zinc-100 rounded-xl p-3">
+                    <div className="flex items-start gap-3">
                       {row.image_url ? (
                         <img src={row.image_url} alt={row.name} className="w-12 h-12 rounded-lg object-cover border border-zinc-200" />
                       ) : (
@@ -847,6 +943,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                             <input
                               type="number"
                               min={15}
+                              step={1}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               value={row.duration || 60}
                               onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, duration: Number(e.target.value || 60) } : x))}
                               placeholder="Duración"
@@ -856,7 +955,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                       {editingClassTypeId === row.id ? (
                         <button
                           type="button"
@@ -940,12 +1039,156 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Fecha</label>
-                    <input ref={datePickerRef} readOnly type="text" className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bebas text-zinc-900 text-center outline-none focus:border-brand transition-all" />
+                    {isTouchDevice ? (
+                      <input
+                        type="date"
+                        value={formData.date}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
+                        className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
+                      />
+                    ) : (
+                      <input ref={datePickerRef} readOnly type="text" className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bebas text-zinc-900 text-center outline-none focus:border-brand transition-all" />
+                    )}
                   </div>
                   <div>
                     <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Horario</label>
-                    <input ref={startTimePickerRef} readOnly type="text" className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all" />
+                    {isTouchDevice ? (
+                      <input
+                        type="time"
+                        value={formData.startTime}
+                        onChange={(e) => {
+                          const start = e.target.value;
+                          const [hours, minutes] = start.split(':').map(Number);
+                          const endDate = new Date();
+                          endDate.setHours(hours || 0, minutes || 0, 0, 0);
+                          endDate.setMinutes(endDate.getMinutes() + 60);
+                          const end = `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+                          setFormData((prev) => ({ ...prev, startTime: start, endTime: end }));
+                        }}
+                        className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
+                      />
+                    ) : (
+                      <input ref={startTimePickerRef} readOnly type="text" className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all" />
+                    )}
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div>
+                    <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Mínimo de Alumnos</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      max={formData.maxCapacity}
+                      value={formData.minCapacity}
+                      onChange={(e) => setFormData(prev => ({ ...prev, minCapacity: Number(e.target.value || 1) }))}
+                      className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Máximo de Alumnos</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={formData.maxCapacity}
+                      onChange={(e) => setFormData(prev => ({ ...prev, maxCapacity: Number(e.target.value || 8) }))}
+                      className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4 sm:p-5 space-y-4">
+                  <label className="inline-flex items-center gap-3 text-xs font-black uppercase tracking-widest text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={recurrenceConfig.enabled}
+                      onChange={(e) => setRecurrenceConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+                      className="w-4 h-4 accent-zinc-900"
+                    />
+                    Programación recurrente
+                  </label>
+
+                  {recurrenceConfig.enabled && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-2">
+                          <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500">Tipo de recurrencia</label>
+                          <select
+                            value={recurrenceConfig.recurrenceType}
+                            onChange={(e) => setRecurrenceConfig((prev) => ({ ...prev, recurrenceType: e.target.value as any }))}
+                            className="w-full border border-zinc-200 rounded-xl p-3 text-sm font-semibold text-zinc-800 outline-none focus:border-zinc-900"
+                          >
+                            <option value="weekly">Semanal</option>
+                            <option value="daily">Diaria</option>
+                            <option value="custom">Personalizada</option>
+                          </select>
+                        </div>
+
+                        <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-2">
+                          <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500">Duración de la programación (semanas)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={24}
+                            step={1}
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={recurrenceConfig.weeks}
+                            onChange={(e) => setRecurrenceConfig((prev) => ({ ...prev, weeks: Number(e.target.value || 4) }))}
+                            className="w-full border border-zinc-200 rounded-xl p-3 text-sm font-semibold text-zinc-800 outline-none focus:border-zinc-900"
+                            placeholder="Ejemplo: 4"
+                          />
+                          <p className="text-[10px] font-semibold text-zinc-500">Define cuántas semanas estará activa esta recurrencia.</p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Días de repetición</p>
+                          {recurrenceConfig.recurrenceType === 'daily' && (
+                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Modo diario activo</span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                          {['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((label, idx) => {
+                            const selected = recurrenceConfig.daysOfWeek.includes(idx);
+                            const disabled = recurrenceConfig.recurrenceType === 'daily';
+                            return (
+                              <button
+                                key={label}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => {
+                                  setRecurrenceConfig((prev) => ({
+                                    ...prev,
+                                    daysOfWeek: prev.daysOfWeek.includes(idx)
+                                      ? prev.daysOfWeek.filter((d) => d !== idx)
+                                      : [...prev.daysOfWeek, idx]
+                                  }));
+                                }}
+                                className={`px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                                  selected
+                                    ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
+                                    : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:border-zinc-400'
+                                } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-zinc-500">
+                          En recurrencia semanal se toma por defecto el día seleccionado en la fecha inicial, si no marcas días manualmente.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Advertencia de Conflicto de Horario */}
@@ -1040,7 +1283,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       <div className="flex items-center space-x-3 sm:space-x-4">
                         <div className="text-center">
                           <span className="text-lg sm:text-xl font-black text-brand">{availability[inst.id] || 0}</span>
-                          <span className="text-[7px] sm:text-[8px] font-black text-zinc-400 uppercase tracking-widest block">/ 8</span>
+                          <span className="text-[7px] sm:text-[8px] font-black text-zinc-400 uppercase tracking-widest block">/ {Number((inst as any).max_capacity || inst.capacity || 8)}</span>
                         </div>
                         <button 
                           onClick={() => setDeletingId(inst.id)} 
@@ -1060,6 +1303,17 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                      <p className="text-[8px] sm:text-[10px] text-zinc-400 font-black uppercase tracking-widest mt-2">Cambia de pestaña de año o crea una clase nueva</p>
                   </div>
                 )}
+              </div>
+
+              <div className="pt-3">
+                <h3 className="text-xl sm:text-2xl font-bebas text-zinc-900 tracking-wide uppercase italic mb-3">Calendario de Clases</h3>
+                <ClassCalendar
+                  classes={calendarYearInstances}
+                  availability={availability}
+                  mode="coach"
+                  loading={calendarLoading}
+                  onOpenCoachDetail={(classItem) => setSelectedCalendarClass(classItem)}
+                />
               </div>
             </div>
           </div>

@@ -1,18 +1,15 @@
 import React, { useState } from 'react';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 interface ForgotPasswordProps {
   onBack?: () => void;
 }
 
 export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
-  console.log('ForgotPassword component rendering...');
-  
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-
-  console.log('ForgotPassword state:', { email, loading, success, error });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +28,10 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
       if (data.success) {
         setSuccess(true);
       } else {
-        setError(data.error || 'Error al procesar la solicitud');
+        setError(getFriendlyErrorMessage(data, 'No pudimos procesar tu solicitud.'));
       }
-    } catch (error) {
-      setError('Error de conexión. Por favor intenta nuevamente.');
+    } catch (error: any) {
+      setError(getFriendlyErrorMessage(error, 'Sin conexión. Verifica tu internet e intenta de nuevo.'));
     } finally {
       setLoading(false);
     }

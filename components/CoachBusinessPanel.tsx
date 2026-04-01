@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api, logger } from '../lib/api.ts';
 import { Profile } from '../types.ts';
+import { useAppData } from '../contexts/AppDataContext.tsx';
+import { emitStudentStateChanged } from '../lib/studentStateSync.ts';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 type CoachBusinessTab = 'creator' | 'community' | 'management' | 'cashcut';
 
@@ -23,9 +26,12 @@ interface CommunityStudent {
   id: string;
   full_name: string;
   email: string;
+  whatsapp_phone?: string;
   email_verified: number;
   credits_remaining: number;
   total_attended: number;
+  notified_by_email?: boolean;
+  last_cancellation_notified_at?: string | null;
   warning_low_battery?: boolean;
   days_to_expiry?: number | null;
   current_subscription?: any;
@@ -42,6 +48,13 @@ interface ClassOption {
   status: string;
 }
 
+interface WhatsAppTemplate {
+  id: string;
+  name: string;
+  body: string;
+  is_default_cancellation: number;
+}
+
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const firstDayOfMonthIso = () => {
   const now = new Date();
@@ -52,18 +65,31 @@ const firstDayOfMonthIso = () => {
 const money = (value: number) =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(value || 0);
 
-const resolveErrorMessage = (err: any, fallback: string) => {
-  const rawMessage = err?.message;
-  if (!rawMessage) return fallback;
-  try {
-    const parsed = JSON.parse(rawMessage);
-    return parsed?.error || parsed?.message || fallback;
-  } catch {
-    return rawMessage || fallback;
-  }
-};
+const WHATSAPP_VARIABLES = [
+  '{{nombre_alumno}}',
+  '{{email_alumno}}',
+  '{{whatsapp_alumno}}',
+  '{{paquete_actual}}',
+  '{{creditos_restantes}}',
+  '{{fecha_vencimiento_paquete}}',
+  '{{dias_para_vencer}}',
+  '{{clase_activa}}',
+  '{{proxima_clase}}',
+  '{{fecha_cancelacion}}',
+  '{{email_verificado}}',
+  '{{nombre_negocio}}'
+];
+
+const resolveErrorMessage = (err: any, fallback: string) => getFriendlyErrorMessage(err, fallback);
 
 export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) => {
+  const {
+    packages: sharedPackages,
+    classes: sharedClasses,
+    refreshPackages,
+    refreshClasses,
+    refreshAvailability
+  } = useAppData();
   const [activeTab, setActiveTab] = useState<CoachBusinessTab>('creator');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +97,15 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [classCatalog, setClassCatalog] = useState<ClassOption[]>([]);
   const [community, setCommunity] = useState<CommunityStudent[]>([]);
+  const [whatsAppTemplates, setWhatsAppTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [templateSelectionByStudent, setTemplateSelectionByStudent] = useState<Record<string, string>>({});
+  const [templateForm, setTemplateForm] = useState({
+    id: '',
+    name: '',
+    body: '',
+    is_default_cancellation: false
+  });
+  const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [selectedStudentDetail, setSelectedStudentDetail] = useState<any>(null);
 
@@ -119,20 +154,23 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
   const [cashAvailableMonths, setCashAvailableMonths] = useState<number[]>([]);
   const [cashCutData, setCashCutData] = useState<any>(null);
 
-  const loadPackages = async () => {
-    const data = await api.coach.getPackages();
-    setPackages(Array.isArray(data) ? data : []);
-  };
+  useEffect(() => {
+    setPackages(Array.isArray(sharedPackages) ? sharedPackages : []);
+  }, [sharedPackages]);
 
-  const loadClassCatalog = async () => {
-    const data = await api.getClasses();
-    const safeList = Array.isArray(data) ? data : [];
+  useEffect(() => {
+    const safeList = Array.isArray(sharedClasses) ? sharedClasses : [];
     setClassCatalog(safeList.filter((item: any) => item?.status === 'active'));
-  };
+  }, [sharedClasses]);
 
   const loadCommunity = async () => {
     const data = await api.coach.getCommunity();
     setCommunity(Array.isArray(data) ? data : []);
+  };
+
+  const loadWhatsAppTemplates = async () => {
+    const data = await api.coach.getWhatsAppTemplates();
+    setWhatsAppTemplates(Array.isArray(data) ? data : []);
   };
 
   const loadCashCut = async (filters?: { year?: number; month?: number; startDate?: string; endDate?: string }) => {
@@ -166,9 +204,10 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
         setLoading(true);
         setError(null);
         await Promise.all([
-          loadPackages(),
-          loadClassCatalog(),
+          refreshPackages(),
+          refreshClasses(),
           loadCommunity(),
+          loadWhatsAppTemplates(),
           loadCashCut({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 })
         ]);
       } catch (err: any) {
@@ -179,7 +218,19 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       }
     };
     boot();
-  }, []);
+  }, [refreshClasses, refreshPackages]);
+
+  useEffect(() => {
+    if (!community.length || !whatsAppTemplates.length) return;
+    const defaultTemplate = whatsAppTemplates.find((t) => Number(t.is_default_cancellation || 0) === 1) || whatsAppTemplates[0];
+    setTemplateSelectionByStudent((prev) => {
+      const next = { ...prev };
+      community.forEach((student) => {
+        if (!next[student.id]) next[student.id] = defaultTemplate.id;
+      });
+      return next;
+    });
+  }, [community, whatsAppTemplates]);
 
   useEffect(() => {
     const selected = community.find((s) => s.id === selectedStudentId);
@@ -259,7 +310,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       } else {
         await api.coach.createPackage(payload);
       }
-      await loadPackages();
+      await refreshPackages();
       resetPackageForm();
     } catch (err: any) {
       logger.error('Error saving package', err);
@@ -274,7 +325,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       setLoading(true);
       setError(null);
       await api.coach.deletePackage(id);
-      await loadPackages();
+      await refreshPackages();
       if (packageForm.id === id) resetPackageForm();
     } catch (err: any) {
       logger.error('Error deleting package', err);
@@ -316,7 +367,9 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
         actor_id: user.id
       });
       await loadCommunity();
+      await refreshPackages();
       await loadStudentDetail(selectedStudentId);
+      emitStudentStateChanged(selectedStudentId);
       setSubscriptionForm({
         paquete_id: '',
         metodo_pago: 'transferencia',
@@ -344,6 +397,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       });
       await loadCommunity();
       await loadStudentDetail(selectedStudentId);
+      emitStudentStateChanged(selectedStudentId);
       setManualCreditsForm({ amount: '', reason: '' });
     } catch (err: any) {
       logger.error('Error adjusting credits', err);
@@ -366,6 +420,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
         actor_id: user.id
       });
       await loadCommunity();
+      await Promise.all([refreshClasses(), refreshAvailability()]);
       await loadStudentDetail(selectedStudentId);
     } catch (err: any) {
       logger.error('Error registering attendance', err);
@@ -382,6 +437,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       setError(null);
       await api.createReservation(selectedStudentId, attendanceForm.class_id);
       await loadCommunity();
+      await Promise.all([refreshClasses(), refreshAvailability()]);
       await loadStudentDetail(selectedStudentId);
     } catch (err: any) {
       logger.error('Error assigning student to class', err);
@@ -415,6 +471,9 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       await api.coach.toggleSubscriptionFreeze(subscriptionId, currentFrozen ? 'resume' : 'pause');
       await loadCommunity();
       await loadStudentDetail(selectedStudentId);
+      if (selectedStudentId) {
+        emitStudentStateChanged(selectedStudentId);
+      }
     } catch (err: any) {
       logger.error('Error toggling freeze', err);
       setError(resolveErrorMessage(err, 'No se pudo actualizar el congelamiento'));
@@ -441,6 +500,152 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
     }
   };
 
+  const normalizePhoneForWa = (phone?: string) => String(phone || '').replace(/[^\d]/g, '');
+
+  const buildWhatsAppMessage = (templateBody: string, student: CommunityStudent) => {
+    const formatClassLabel = (classRow: any) => {
+      if (!classRow) return 'Sin clase';
+      const dateLabel = classRow.date ? new Date(`${classRow.date}T00:00:00`).toLocaleDateString('es-MX') : '';
+      const timeLabel = classRow.start_time ? String(classRow.start_time).slice(0, 5) : '';
+      return `${classRow.type || 'Clase'}${dateLabel ? ` - ${dateLabel}` : ''}${timeLabel ? ` ${timeLabel}` : ''}`.trim();
+    };
+    const activeClass = student.active_class;
+    const nextClass = student.next_class;
+    const expiryRaw = student.current_subscription?.fecha_vencimiento;
+    const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+    const expiryLabel = expiryDate && !Number.isNaN(expiryDate.getTime())
+      ? expiryDate.toLocaleDateString('es-MX')
+      : 'Sin vencimiento';
+    const nowLabel = new Date().toLocaleString('es-MX');
+    const replacements: Record<string, string> = {
+      nombre: student.full_name || '',
+      correo: student.email || '',
+      paquete: student.current_subscription?.package_name || 'Sin paquete activo',
+      clases_restantes: String(student.current_subscription?.clases_restantes ?? student.credits_remaining ?? 0),
+      clase: nextClass?.type || 'tu próxima clase',
+      fecha: nextClass?.date || '',
+      hora_inicio: String(nextClass?.start_time || '').slice(0, 5),
+      hora_fin: String(nextClass?.end_time || '').slice(0, 5)
+    };
+    return templateBody.replace(/\{(\w+)\}/g, (_, key) => replacements[key] ?? '');
+  };
+
+  const buildWhatsAppMessageWithTokens = (templateBody: string, student: CommunityStudent) => {
+    const formatClassLabel = (classRow: any) => {
+      if (!classRow) return 'Sin clase';
+      const dateLabel = classRow.date ? new Date(`${classRow.date}T00:00:00`).toLocaleDateString('es-MX') : '';
+      const timeLabel = classRow.start_time ? String(classRow.start_time).slice(0, 5) : '';
+      return `${classRow.type || 'Clase'}${dateLabel ? ` - ${dateLabel}` : ''}${timeLabel ? ` ${timeLabel}` : ''}`.trim();
+    };
+    const activeClass = student.active_class;
+    const nextClass = student.next_class;
+    const expiryRaw = student.current_subscription?.fecha_vencimiento;
+    const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+    const expiryLabel = expiryDate && !Number.isNaN(expiryDate.getTime())
+      ? expiryDate.toLocaleDateString('es-MX')
+      : 'Sin vencimiento';
+    const nowLabel = new Date().toLocaleString('es-MX');
+    const replacements: Record<string, string> = {
+      nombre_alumno: student.full_name || '',
+      email_alumno: student.email || '',
+      whatsapp_alumno: student.whatsapp_phone || '',
+      paquete_actual: student.current_subscription?.package_name || 'Sin paquete activo',
+      creditos_restantes: String(student.current_subscription?.clases_restantes ?? student.credits_remaining ?? 0),
+      fecha_vencimiento_paquete: expiryLabel,
+      dias_para_vencer: typeof student.days_to_expiry === 'number' ? String(student.days_to_expiry) : 'N/A',
+      clase_activa: formatClassLabel(activeClass),
+      proxima_clase: formatClassLabel(nextClass),
+      fecha_cancelacion: nowLabel,
+      email_verificado: Number(student.email_verified || 0) === 1 ? 'Sí' : 'No',
+      nombre_negocio: 'Focus Fitness',
+      nombre: student.full_name || '',
+      correo: student.email || '',
+      paquete: student.current_subscription?.package_name || 'Sin paquete activo',
+      clases_restantes: String(student.current_subscription?.clases_restantes ?? student.credits_remaining ?? 0),
+      clase: formatClassLabel(nextClass),
+      fecha: nextClass?.date || '',
+      hora_inicio: String(nextClass?.start_time || '').slice(0, 5),
+      hora_fin: String(nextClass?.end_time || '').slice(0, 5)
+    };
+    const withDouble = templateBody.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => replacements[key] ?? '');
+    return withDouble.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => replacements[key] ?? '');
+  };
+
+  const insertVariableInTemplate = (variableToken: string) => {
+    const textarea = templateTextareaRef.current;
+    if (!textarea) {
+      setTemplateForm((prev) => ({ ...prev, body: `${prev.body}${variableToken}` }));
+      return;
+    }
+    const start = textarea.selectionStart ?? templateForm.body.length;
+    const end = textarea.selectionEnd ?? templateForm.body.length;
+    const nextBody = `${templateForm.body.slice(0, start)}${variableToken}${templateForm.body.slice(end)}`;
+    setTemplateForm((prev) => ({ ...prev, body: nextBody }));
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const nextCursor = start + variableToken.length;
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  const openWhatsAppForStudent = (student: CommunityStudent) => {
+    const selectedTemplateId = templateSelectionByStudent[student.id];
+    const template = whatsAppTemplates.find((tpl) => tpl.id === selectedTemplateId) || whatsAppTemplates[0];
+    if (!template) return;
+    const phone = normalizePhoneForWa(student.whatsapp_phone);
+    if (!phone) {
+      setError(`El alumno ${student.full_name} no tiene número de WhatsApp registrado.`);
+      return;
+    }
+    const message = buildWhatsAppMessageWithTokens(template.body, student);
+    const link = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(link, '_blank');
+  };
+
+  const handleSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!templateForm.name.trim() || !templateForm.body.trim()) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const payload = {
+        name: templateForm.name.trim(),
+        body: templateForm.body.trim(),
+        is_default_cancellation: templateForm.is_default_cancellation ? 1 : 0,
+        actor_id: user.id
+      };
+      if (templateForm.id) {
+        await api.coach.updateWhatsAppTemplate(templateForm.id, payload);
+      } else {
+        await api.coach.createWhatsAppTemplate(payload);
+      }
+      await loadWhatsAppTemplates();
+      setTemplateForm({ id: '', name: '', body: '', is_default_cancellation: false });
+    } catch (err: any) {
+      logger.error('Error saving WhatsApp template', err);
+      setError(resolveErrorMessage(err, 'No se pudo guardar la plantilla de WhatsApp'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await api.coach.deleteWhatsAppTemplate(templateId);
+      await loadWhatsAppTemplates();
+      if (templateForm.id === templateId) {
+        setTemplateForm({ id: '', name: '', body: '', is_default_cancellation: false });
+      }
+    } catch (err: any) {
+      logger.error('Error deleting WhatsApp template', err);
+      setError(resolveErrorMessage(err, 'No se pudo eliminar la plantilla de WhatsApp'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const selectedStudent = community.find((s) => s.id === selectedStudentId) || null;
   const studentSubscriptions = Array.isArray(selectedStudentDetail?.subscriptions) ? selectedStudentDetail.subscriptions : [];
   const selectedActiveSubscription = studentSubscriptions.find((sub: any) => sub?.estado === 'active') || null;
@@ -453,7 +658,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
   });
 
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="space-y-6 sm:space-y-8 overflow-x-hidden [&_button]:min-h-[44px] [&_input]:min-h-[44px] [&_select]:min-h-[44px]">
       <div className="bg-white border-2 border-zinc-50 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 shadow-xl">
         <div className="flex flex-col gap-4 sm:gap-6">
           <div>
@@ -485,23 +690,23 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Nombre del Paquete</label>
                 <input className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Ej. FOCUS WORK" value={packageForm.nombre} onChange={(e) => setPackageForm((prev) => ({ ...prev, nombre: e.target.value }))} required />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Capacidad</label>
-                  <input type="number" min={1} max={3} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Capacidad (ej. 1, 2 o 3 personas)" value={packageForm.capacidad} onChange={(e) => setPackageForm((prev) => ({ ...prev, capacidad: Number(e.target.value) }))} required />
+                  <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} min={1} max={3} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Capacidad (ej. 1, 2 o 3 personas)" value={packageForm.capacidad} onChange={(e) => setPackageForm((prev) => ({ ...prev, capacidad: Number(e.target.value || prev.capacidad || 1) }))} required />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Numero de Clases</label>
-                  <input type="number" min={1} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Numero de Clases" value={packageForm.numero_clases} onChange={(e) => setPackageForm((prev) => ({ ...prev, numero_clases: Number(e.target.value) }))} required />
+                  <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} min={1} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Numero de Clases" value={packageForm.numero_clases} onChange={(e) => setPackageForm((prev) => ({ ...prev, numero_clases: Number(e.target.value || prev.numero_clases || 1) }))} required />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Vigencia</label>
-                  <input type="number" min={1} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Vigencia (en semanas)" value={packageForm.vigencia_semanas} onChange={(e) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: Number(e.target.value) }))} required />
+                  <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} min={1} className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Vigencia (en semanas)" value={packageForm.vigencia_semanas} onChange={(e) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: Number(e.target.value || prev.vigencia_semanas || 1) }))} required />
                 </div>
               </div>
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Precio Base</label>
-                <input type="number" min={0} step="0.01" className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Precio Base" value={packageForm.precio_base} onChange={(e) => setPackageForm((prev) => ({ ...prev, precio_base: Number(e.target.value) }))} required />
+                <input type="number" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" min={0} step="0.01" className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Precio Base" value={packageForm.precio_base} onChange={(e) => setPackageForm((prev) => ({ ...prev, precio_base: Number(e.target.value || prev.precio_base || 0) }))} required />
               </div>
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Detalles y Politicas</label>
@@ -549,8 +754,107 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       )}
 
       {activeTab === 'community' && (
-        <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 overflow-x-auto">
-          <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Comunidad y estatus en tiempo real</h4>
+        <div className="space-y-6">
+          <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
+            <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Seguimiento por WhatsApp</h4>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <form onSubmit={handleSaveTemplate} className="space-y-3">
+                <input
+                  className="w-full border border-zinc-200 rounded-xl p-3 text-sm"
+                  placeholder="Nombre de plantilla"
+                  value={templateForm.name}
+                  onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))}
+                  required
+                />
+                <textarea
+                  ref={templateTextareaRef}
+                  className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[110px]"
+                  placeholder="Mensaje con variables dinámicas, por ejemplo: Hola {{nombre_alumno}}, tu próxima clase es {{proxima_clase}}."
+                  value={templateForm.body}
+                  onChange={(e) => setTemplateForm((prev) => ({ ...prev, body: e.target.value }))}
+                  required
+                />
+                <div className="space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Variables disponibles</p>
+                  <div className="flex flex-wrap gap-2">
+                    {WHATSAPP_VARIABLES.map((variableToken) => (
+                      <button
+                        key={variableToken}
+                        type="button"
+                        onClick={() => insertVariableInTemplate(variableToken)}
+                        className="px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-[10px] font-black tracking-widest"
+                      >
+                        {variableToken}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={templateForm.is_default_cancellation}
+                    onChange={(e) => setTemplateForm((prev) => ({ ...prev, is_default_cancellation: e.target.checked }))}
+                  />
+                  Plantilla predeterminada de cancelación
+                </label>
+                <div className="flex gap-2">
+                  <button disabled={loading} className="px-5 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">
+                    {templateForm.id ? 'Actualizar plantilla' : 'Guardar plantilla'}
+                  </button>
+                  {templateForm.id && (
+                    <button
+                      type="button"
+                      onClick={() => setTemplateForm({ id: '', name: '', body: '', is_default_cancellation: false })}
+                      className="px-5 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+              </form>
+
+              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                {whatsAppTemplates.length === 0 && <p className="text-sm text-zinc-400">No hay plantillas registradas.</p>}
+                {whatsAppTemplates.map((tpl) => (
+                  <div key={tpl.id} className="border border-zinc-100 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-black text-zinc-900">{tpl.name}</p>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">
+                          {Number(tpl.is_default_cancellation || 0) === 1 ? 'Predeterminada cancelación' : 'Plantilla'}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTemplateForm({
+                            id: tpl.id,
+                            name: tpl.name,
+                            body: tpl.body,
+                            is_default_cancellation: Number(tpl.is_default_cancellation || 0) === 1
+                          })}
+                          className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTemplate(tpl.id)}
+                          className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-zinc-600 mt-2 line-clamp-3">{tpl.body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 overflow-x-auto">
+            <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Comunidad y estatus en tiempo real</h4>
           <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="text-left text-zinc-400 uppercase text-[10px] tracking-widest">
@@ -560,12 +864,14 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 <th className="py-3">Restantes</th>
                 <th className="py-3">Clase Activa</th>
                 <th className="py-3">Proxima Clase</th>
+                <th className="py-3">Seguimiento WhatsApp</th>
+                <th className="py-3">Notificado por correo</th>
               </tr>
             </thead>
             <tbody>
               {community.length === 0 ? (
                 <tr className="border-t border-zinc-100">
-                  <td colSpan={6} className="py-8 text-center text-zinc-400">
+                  <td colSpan={8} className="py-8 text-center text-zinc-400">
                     No hay alumnos para mostrar en comunidad.
                   </td>
                 </tr>
@@ -595,11 +901,41 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                     </td>
                     <td className="py-4">{student.active_class ? `${student.active_class.type} (${student.active_class.start_time})` : 'Ninguna'}</td>
                     <td className="py-4">{student.next_class ? `${student.next_class.type} (${student.next_class.date} ${student.next_class.start_time})` : 'Ninguna'}</td>
+                    <td className="py-4">
+                      <div className="space-y-2 min-w-[240px]">
+                        <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">{student.whatsapp_phone || 'Sin WhatsApp'}</p>
+                        <div className="flex gap-2">
+                          <select
+                            className="border border-zinc-200 rounded-lg p-2 text-xs flex-1 min-h-[44px]"
+                            value={templateSelectionByStudent[student.id] || ''}
+                            onChange={(e) => setTemplateSelectionByStudent((prev) => ({ ...prev, [student.id]: e.target.value }))}
+                          >
+                            <option value="">Plantilla</option>
+                            {whatsAppTemplates.map((tpl) => (
+                              <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => openWhatsAppForStudent(student)}
+                            className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Abrir
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4">
+                      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${student.notified_by_email ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-500'}`}>
+                        {student.notified_by_email ? 'Sí' : 'No'}
+                      </span>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+        </div>
         </div>
       )}
 
@@ -752,7 +1088,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
               <form onSubmit={handleManualCredits} className="space-y-3 border-t border-zinc-100 pt-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Ajuste manual de créditos</p>
-                <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Cantidad (+/-)" value={manualCreditsForm.amount} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                <input type="number" inputMode="numeric" pattern="-?[0-9]*" step={1} className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Cantidad (+/-)" value={manualCreditsForm.amount} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))} required />
                 <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Motivo" value={manualCreditsForm.reason} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, reason: e.target.value }))} required />
                 <button disabled={!selectedStudentId || loading} className="px-5 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">Aplicar ajuste</button>
               </form>
@@ -768,7 +1104,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   ))}
                 </select>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input className="border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Monto (opcional)" value={subscriptionForm.monto} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, monto: e.target.value }))} />
+                  <input type="number" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" min={0} step="0.01" className="border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Monto (opcional)" value={subscriptionForm.monto} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, monto: e.target.value }))} />
                   <select className="border border-zinc-200 rounded-xl p-3 text-sm" value={subscriptionForm.metodo_pago} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, metodo_pago: e.target.value }))}>
                     <option value="transferencia">Transferencia</option>
                     <option value="efectivo">Efectivo</option>
@@ -873,11 +1209,11 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   <>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Fecha inicio</label>
-                      <input type="date" className="w-full border border-zinc-200 rounded-xl p-3 text-sm" value={cashRange.startDate} onChange={(e) => setCashRange((prev) => ({ ...prev, startDate: e.target.value }))} />
+                  <input type="date" className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]" value={cashRange.startDate} onChange={(e) => setCashRange((prev) => ({ ...prev, startDate: e.target.value }))} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Fecha fin</label>
-                      <input type="date" className="w-full border border-zinc-200 rounded-xl p-3 text-sm" value={cashRange.endDate} onChange={(e) => setCashRange((prev) => ({ ...prev, endDate: e.target.value }))} />
+                  <input type="date" className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]" value={cashRange.endDate} onChange={(e) => setCashRange((prev) => ({ ...prev, endDate: e.target.value }))} />
                     </div>
                     <div className="flex items-end">
                       <button disabled={loading} className="w-full py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">Aplicar rango</button>

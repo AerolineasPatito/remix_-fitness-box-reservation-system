@@ -4,12 +4,15 @@ import { ClassInstance, AvailabilityState, Profile } from '../types.ts';
 import { ClassStatusBadge } from './ClassStatusBadge.tsx';
 import { resolveClassTypeFromSlug, slugifyClassType } from '../lib/routeHelpers.ts';
 import { api } from '../lib/api.ts';
+import { calculateCancellationDeadline, formatCancellationDeadline, CancellationPolicySettings } from '../lib/cancellationPolicy.ts';
+import { useAppData } from '../contexts/AppDataContext.tsx';
 
 interface ScheduleProps {
   instances: ClassInstance[];
   availability: AvailabilityState;
   user?: Profile | null;
   onUserProfileUpdate?: (profile: Profile) => void;
+  onStudentDashboardUpdate?: (dashboard: any) => void;
 }
 
 type ClassTypeRow = {
@@ -38,25 +41,31 @@ type DashboardData = {
   }>;
 };
 
-export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, user, onUserProfileUpdate }) => {
+export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, user, onUserProfileUpdate, onStudentDashboardUpdate }) => {
   const { serviceType } = useParams<{ serviceType: string }>();
   const navigate = useNavigate();
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
-  const [classTypesByName, setClassTypesByName] = useState<Record<string, ClassTypeRow>>({});
+  const { classTypes, systemSettings } = useAppData();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [publicSettings, setPublicSettings] = useState<{ cancellation_limit_hours: number }>({ cancellation_limit_hours: 8 });
+  const [publicSettings, setPublicSettings] = useState<CancellationPolicySettings>({
+    cancellation_limit_hours: 8,
+    cancellation_cutoff_morning: '08:00',
+    cancellation_deadline_evening: '22:00'
+  });
   const [cancelingReservationId, setCancelingReservationId] = useState<string | null>(null);
-  const [cancelPreview, setCancelPreview] = useState<{ reservationId: string; isLate: boolean; limitHours: number } | null>(null);
+  const [cancelPreview, setCancelPreview] = useState<{ reservationId: string; isLate: boolean; limitHours: number; deadlineLabel: string } | null>(null);
+  const [selectedReservation, setSelectedReservation] = useState<any | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const selectedSlug = (serviceType || '').toLowerCase();
   const decodedService = useMemo(() => {
+    const classTypesByName = Object.fromEntries((classTypes || []).map((t: any) => [t.name, t]));
     const fromClassTypes = Object.keys(classTypesByName).find((name) => slugifyClassType(name) === selectedSlug);
     if (fromClassTypes) return fromClassTypes;
     const fromInstances = instances.find((inst) => slugifyClassType(inst.type) === selectedSlug)?.type;
     if (fromInstances) return fromInstances;
     return resolveClassTypeFromSlug(serviceType || '');
-  }, [classTypesByName, instances, selectedSlug, serviceType]);
+  }, [classTypes, instances, selectedSlug, serviceType]);
   const isStudent = user?.role === 'student';
   const colorThemeClass = (theme?: string | null) => {
     const value = (theme || '').toLowerCase();
@@ -67,35 +76,28 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
     return 'bg-zinc-100 text-zinc-700';
   };
 
-  const reloadStudentDashboard = async () => {
+  const fetchDashboardData = async () => {
     if (!user?.id || user.role !== 'student') return;
     try {
       const data = await api.getStudentDashboard(user.id);
       setDashboard(data);
+      onStudentDashboardUpdate?.(data);
     } catch {
       setDashboard(null);
+      onStudentDashboardUpdate?.(null);
     }
   };
 
   useEffect(() => {
-    const loadMeta = async () => {
-      try {
-        const [types, settings] = await Promise.all([api.getClassTypes(), api.getPublicSettings()]);
-        const map: Record<string, ClassTypeRow> = {};
-        (Array.isArray(types) ? types : []).forEach((t: ClassTypeRow) => {
-          map[t.name] = t;
-        });
-        setClassTypesByName(map);
-        if (settings?.cancellation_limit_hours) {
-          setPublicSettings({ cancellation_limit_hours: Number(settings.cancellation_limit_hours) || 8 });
-        }
-      } catch {}
-    };
-    loadMeta();
-  }, []);
+    setPublicSettings({
+      cancellation_limit_hours: Number(systemSettings?.cancellation_limit_hours || 8),
+      cancellation_cutoff_morning: String(systemSettings?.cancellation_cutoff_morning || '08:00'),
+      cancellation_deadline_evening: String(systemSettings?.cancellation_deadline_evening || '22:00')
+    });
+  }, [systemSettings]);
 
   useEffect(() => {
-    reloadStudentDashboard();
+    fetchDashboardData();
   }, [user?.id, user?.role]);
 
   const dates = useMemo(() => {
@@ -117,6 +119,13 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
 
   const activeDate = dates[selectedDayIdx];
   const activeClasses = instances.filter((inst) => slugifyClassType(inst.type) === selectedSlug && inst.date === activeDate.dateStr);
+  const classTypesByName = useMemo(() => {
+    const map: Record<string, ClassTypeRow> = {};
+    (Array.isArray(classTypes) ? classTypes : []).forEach((row: any) => {
+      map[row.name] = row;
+    });
+    return map;
+  }, [classTypes]);
 
   const scroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -132,14 +141,18 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   };
 
   const previewCancellation = (reservation: any) => {
-    const start = new Date(`${reservation.date}T${String(reservation.start_time).slice(0, 5)}:00`);
+    const deadline = calculateCancellationDeadline(
+      reservation.date,
+      String(reservation.start_time).slice(0, 5),
+      publicSettings
+    );
     const now = new Date();
-    const diffHours = (start.getTime() - now.getTime()) / (1000 * 60 * 60);
-    const isLate = diffHours < publicSettings.cancellation_limit_hours;
+    const isLate = now.getTime() > deadline.getTime();
     setCancelPreview({
       reservationId: reservation.id,
       isLate,
-      limitHours: publicSettings.cancellation_limit_hours
+      limitHours: publicSettings.cancellation_limit_hours,
+      deadlineLabel: formatCancellationDeadline(deadline)
     });
   };
 
@@ -154,7 +167,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
           onUserProfileUpdate?.(updatedProfile);
         }
       }
-      await reloadStudentDashboard();
+      await fetchDashboardData();
       setCancelPreview(null);
     } finally {
       setCancelingReservationId(null);
@@ -162,7 +175,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
+    <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 overflow-x-hidden [&_button]:min-h-[44px] [&_a]:min-h-[44px]">
       {cancelPreview && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <button
@@ -179,8 +192,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
             </h4>
             <p className="mt-3 text-sm text-zinc-600">
               {cancelPreview.isLate
-                ? `Estás cancelando con menos de ${cancelPreview.limitHours} horas de anticipación. Se libera tu lugar, pero pierdes el crédito.`
-                : `Estás dentro del límite de ${cancelPreview.limitHours} horas o más. Tu crédito será devuelto.`}
+                ? `Estás cancelando después del límite (${cancelPreview.deadlineLabel}). Se libera tu lugar, pero pierdes el crédito.`
+                : `Estás dentro del límite. Puedes cancelar hasta ${cancelPreview.deadlineLabel} y tu crédito será devuelto.`}
             </p>
             <div className="mt-8 flex gap-3">
               <button
@@ -197,6 +210,44 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                 className="flex-1 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-60"
               >
                 {cancelingReservationId === cancelPreview.reservationId ? 'Cancelando...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedReservation && (
+        <div className="fixed inset-0 z-[125] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-zinc-900/75"
+            onClick={() => setSelectedReservation(null)}
+          />
+          <div className="relative z-10 w-full max-w-lg bg-white rounded-3xl border border-zinc-100 p-6 sm:p-8 shadow-2xl">
+            <h4 className="text-3xl font-bebas tracking-tight uppercase italic text-zinc-900">Detalle de Reserva</h4>
+            <div className="mt-4 space-y-2 text-sm text-zinc-600">
+              <p><span className="font-black text-zinc-900">Clase:</span> {selectedReservation.type}</p>
+              <p><span className="font-black text-zinc-900">Fecha:</span> {new Date(`${selectedReservation.date}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+              <p><span className="font-black text-zinc-900">Horario:</span> {String(selectedReservation.start_time).slice(0, 5)} - {String(selectedReservation.end_time).slice(0, 5)}</p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedReservation(null)}
+                className="flex-1 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = selectedReservation;
+                  setSelectedReservation(null);
+                  previewCancellation(target);
+                }}
+                className="flex-1 py-3 rounded-xl bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all"
+              >
+                Cancelar Reserva
               </button>
             </div>
           </div>
@@ -469,7 +520,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
         <div className="relative z-10 space-y-2">
           <h5 className="text-brand font-bebas text-2xl tracking-wide uppercase">Política de Respeto</h5>
           <p className="text-zinc-400 text-xs font-medium max-w-md">
-            Recuerda cancelar con al menos <span className="text-white font-bold underline decoration-brand underline-offset-4">{publicSettings.cancellation_limit_hours} horas de anticipación</span> para evitar penalización de crédito.
+            Recuerda revisar tu horario de cancelación antes de la clase para evitar penalización de crédito.
           </p>
         </div>
         <div className="relative z-10 w-16 h-16 rounded-2xl border border-zinc-800 flex items-center justify-center text-zinc-700">

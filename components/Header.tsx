@@ -68,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout }) => {
               </div>
               <button 
                 onClick={onLogout}
-                className="w-8 h-8 lg:w-10 lg:h-10 rounded-xl bg-zinc-50 border border-zinc-100 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
+                className="w-11 h-11 rounded-xl bg-zinc-50 border border-zinc-100 flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all"
                 title="Cerrar Sesión"
               >
                 <i className="fas fa-sign-out-alt text-xs"></i>
@@ -80,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout }) => {
         {/* Mobile Menu Button */}
         <button 
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="lg:hidden w-10 h-10 rounded-xl bg-zinc-50 border border-zinc-100 flex items-center justify-center text-zinc-600 hover:text-brand transition-all"
+          className="lg:hidden w-11 h-11 rounded-xl bg-zinc-50 border border-zinc-100 flex items-center justify-center text-zinc-600 hover:text-brand transition-all"
         >
           <i className={`fas ${mobileMenuOpen ? 'fa-times' : 'fa-bars'} text-lg`}></i>
         </button>
@@ -139,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout }) => {
                   </div>
                   <button 
                     onClick={onLogout}
-                    className="w-8 h-8 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 hover:bg-rose-100 transition-all"
+                    className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 hover:bg-rose-100 transition-all"
                   >
                     <i className="fas fa-sign-out-alt text-xs"></i>
                   </button>

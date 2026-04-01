@@ -1,10 +1,38 @@
 
+import { toFriendlyError } from './errorMessages.ts';
+
+const isDev = typeof process !== 'undefined' ? process.env.NODE_ENV !== 'production' : true;
+
 export const logger = {
   log: (message: string, data?: any) => {
+    if (!isDev) return;
     console.log(`%c[FOCUS-LOG]: ${message}`, 'color: #3794a4; font-weight: bold;', data || '');
   },
   error: (message: string, error?: any) => {
+    if (!isDev) return;
     console.error(`%c[FOCUS-ERROR]: ${message}`, 'color: #ef4444; font-weight: bold;', error || '');
+  }
+};
+
+const createApiError = (input: any) => {
+  const normalized = toFriendlyError(input, {
+    fallback: 'Algo salió mal al procesar tu solicitud. Intenta de nuevo.'
+  });
+  const error = new Error(normalized.message);
+  (error as any).code = normalized.code;
+  (error as any).status = normalized.status;
+  (error as any).retryable = normalized.retryable;
+  (error as any).raw = input;
+  return error;
+};
+
+const handleUnauthorized = () => {
+  try {
+    localStorage.removeItem('focus_session');
+    sessionStorage.setItem('focus_auth_feedback', 'Tu sesión expiró. Inicia sesión de nuevo.');
+  } catch {}
+  if (typeof window !== 'undefined') {
+    window.location.href = '/';
   }
 };
 
@@ -13,29 +41,46 @@ const handleResponse = async (res: Response) => {
   if (contentType && contentType.includes('application/json')) {
     const data = await res.json();
     
-    // If response is not ok, throw error with details
     if (!res.ok) {
-      const error = new Error(data.message || 'Request failed');
-      if (data.error) {
-        (error as any).code = data.error;
+      const normalizedError = createApiError({
+        ...data,
+        message: data?.message || data?.error,
+        status: res.status
+      });
+      if (res.status === 401) {
+        handleUnauthorized();
       }
-      if (data.details) {
-        (error as any).details = data.details;
-      }
-      if (data.suggestions) {
-        (error as any).suggestions = data.suggestions;
-      }
-      // Stringify the entire error for the frontend to parse
-      error.message = JSON.stringify(data);
-      throw error;
+      throw normalizedError;
     }
     
     return data;
   }
-  const text = await res.text();
-  console.error('Non-JSON response received:', text.substring(0, 100));
-  throw new Error(`Server returned non-JSON response (${res.status})`);
+
+  if (!res.ok) {
+    const normalizedError = createApiError({
+      status: res.status,
+      message: `HTTP ${res.status}`
+    });
+    if (res.status === 401) {
+      handleUnauthorized();
+    }
+    throw normalizedError;
+  }
+
+  return res.text();
 };
+
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
+const safeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  try {
+    return await nativeFetch(input, init);
+  } catch (error: any) {
+    throw createApiError(error);
+  }
+};
+
+const fetch = safeFetch;
 
 export const api = {
   getClasses: async (year?: number | string) => {
@@ -43,6 +88,24 @@ export const api = {
     if (year != null && year !== '') params.set('year', String(year));
     const query = params.toString();
     const res = await fetch(`/api/classes${query ? `?${query}` : ''}`);
+    return handleResponse(res);
+  },
+  getCalendarClasses: async (filters?: { startDate?: string; endDate?: string; viewerId?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.startDate) params.set('startDate', filters.startDate);
+    if (filters?.endDate) params.set('endDate', filters.endDate);
+    if (filters?.viewerId) params.set('viewerId', filters.viewerId);
+    const query = params.toString();
+    const res = await fetch(`/api/calendar/classes${query ? `?${query}` : ''}`);
+    return handleResponse(res);
+  },
+  getClassesCalendar: async (filters?: { year?: number | string; includeRoster?: boolean }) => {
+    const params = new URLSearchParams();
+    params.set('includeAllStates', 'true');
+    if (filters?.year != null && filters.year !== '') params.set('year', String(filters.year));
+    if (filters?.includeRoster) params.set('includeRoster', 'true');
+    const query = params.toString();
+    const res = await fetch(`/api/classes?${query}`);
     return handleResponse(res);
   },
   getClassTypes: async () => {
@@ -79,6 +142,12 @@ export const api = {
     const res = await fetch(`/api/profile/${id}`);
     return handleResponse(res);
   },
+  acceptCancellationPolicy: async (id: string) => {
+    const res = await fetch(`/api/profile/${id}/policy-acceptance`, {
+      method: 'POST'
+    });
+    return handleResponse(res);
+  },
   login: async (email: string, password?: string) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -87,11 +156,11 @@ export const api = {
     });
     return handleResponse(res);
   },
-  register: async (email: string, password?: string, fullName?: string) => {
+  register: async (email: string, password?: string, fullName?: string, whatsappPhone?: string) => {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, fullName })
+      body: JSON.stringify({ email, password, fullName, whatsappPhone })
     });
     return handleResponse(res);
   },
@@ -134,6 +203,14 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(classData)
+    });
+    return handleResponse(res);
+  },
+  createRecurringClasses: async (payload: any) => {
+    const res = await fetch('/api/classes/recurring', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
     return handleResponse(res);
   },
@@ -214,6 +291,32 @@ export const api = {
     },
     getCommunity: async () => {
       const res = await fetch('/api/coach/community');
+      return handleResponse(res);
+    },
+    getWhatsAppTemplates: async () => {
+      const res = await fetch('/api/coach/whatsapp-templates');
+      return handleResponse(res);
+    },
+    createWhatsAppTemplate: async (data: any) => {
+      const res = await fetch('/api/coach/whatsapp-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return handleResponse(res);
+    },
+    updateWhatsAppTemplate: async (id: string, data: any) => {
+      const res = await fetch(`/api/coach/whatsapp-templates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return handleResponse(res);
+    },
+    deleteWhatsAppTemplate: async (id: string) => {
+      const res = await fetch(`/api/coach/whatsapp-templates/${id}`, {
+        method: 'DELETE'
+      });
       return handleResponse(res);
     },
     updateStudent: async (id: string, data: any) => {
@@ -341,7 +444,6 @@ export const api = {
       return handleResponse(res);
     },
     getCoachAnalytics: async () => {
-      console.log('Calling getCoachAnalytics API...');
       const res = await fetch('/api/coach/analytics');
       return handleResponse(res);
     },

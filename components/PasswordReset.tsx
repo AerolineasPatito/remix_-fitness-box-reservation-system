@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
 export const PasswordReset: React.FC = () => {
   const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'success'>('loading');
@@ -75,10 +76,10 @@ export const PasswordReset: React.FC = () => {
       if (data.success) {
         setStatus('success');
       } else {
-        setError(data.error || 'Error al restablecer la contraseña');
+        setError(getFriendlyErrorMessage(data, 'No pudimos restablecer tu contraseña.'));
       }
-    } catch (error) {
-      setError('Error de conexión. Por favor intenta nuevamente.');
+    } catch (error: any) {
+      setError(getFriendlyErrorMessage(error, 'Sin conexión. Verifica tu internet e intenta de nuevo.'));
     } finally {
       setLoading(false);
     }

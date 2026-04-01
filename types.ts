@@ -14,6 +14,8 @@ export interface Profile {
   id: string;
   email: string;
   full_name: string;
+  whatsapp_phone?: string;
+  policy_accepted_at?: string | null;
   role: UserRole;
   credits_remaining: number;
   total_attended: number;
@@ -28,6 +30,12 @@ export interface ClassInstance {
   capacity: number;
   imageUrl?: string;
   class_type_id?: string;
+  status?: string;
+  real_time_status?: string;
+  min_capacity?: number;
+  max_capacity?: number;
+  enrolled_count?: number;
+  enrolled_students?: string[];
 }
 
 export interface ClassCategory {

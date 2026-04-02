@@ -102,7 +102,7 @@ export const EmailConfig: React.FC = () => {
     }
   };
 
-  const setPresetConfig = (preset: 'gmail' | 'outlook' | 'cabreudev') => {
+  const setPresetConfig = (preset: 'gmail' | 'outlook' | 'custom') => {
     switch (preset) {
       case 'gmail':
         setConfig({
@@ -128,14 +128,14 @@ export const EmailConfig: React.FC = () => {
           }
         });
         break;
-      case 'cabreudev':
+      case 'custom':
         setConfig({
           provider: 'smtp',
           smtp: {
-            host: 'cabreudev.com',
+            host: 'mail.focusfitnessmvt.com',
             port: 465,
             secure: true,
-            user: 'testing@cabreudev.com',
+            user: '',
             pass: ''
           }
         });
@@ -212,10 +212,10 @@ export const EmailConfig: React.FC = () => {
                         Outlook
                       </button>
                       <button
-                        onClick={() => setPresetConfig('cabreudev')}
+                        onClick={() => setPresetConfig('custom')}
                         className="px-3 py-1 sm:px-4 sm:py-2 bg-purple-500 text-white text-xs sm:text-sm rounded-lg hover:bg-purple-600 transition-colors"
                       >
-                        Cabreudev
+                        Servidor propio
                       </button>
                     </div>
                   </div>
@@ -412,7 +412,7 @@ export const EmailConfig: React.FC = () => {
                 <ul className="text-xs text-blue-700 space-y-1">
                   <li>• Gmail requiere "App Password" si usas 2FA</li>
                   <li>• Outlook usa puerto 587 con STARTTLS</li>
-                  <li>• Cabreudev usa SSL/TLS en puerto 465</li>
+                  <li>• Servidor propio suele usar SSL/TLS en puerto 465</li>
                   <li>• Guarda la configuración antes de probar</li>
                 </ul>
               </div>

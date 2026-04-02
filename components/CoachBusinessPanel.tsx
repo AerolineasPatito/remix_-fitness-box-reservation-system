@@ -369,6 +369,11 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       await loadCommunity();
       await refreshPackages();
       await loadStudentDetail(selectedStudentId);
+      if (cashFilterMode === 'range') {
+        await loadCashCut({ startDate: cashRange.startDate, endDate: cashRange.endDate });
+      } else {
+        await loadCashCut({ year: cashYear, month: cashMonth });
+      }
       emitStudentStateChanged(selectedStudentId);
       setSubscriptionForm({
         paquete_id: '',

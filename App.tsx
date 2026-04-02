@@ -356,7 +356,16 @@ const App: React.FC = () => {
   }
 
   if (!session || !userProfile) {
-    return <Auth onLogin={handleLogin} />;
+    return (
+      <Router>
+        <ScrollToTop />
+        <Routes>
+          <Route path="/verify-email" element={<EmailVerification />} />
+          <Route path="/reset-password" element={<PasswordReset />} />
+          <Route path="*" element={<Auth onLogin={handleLogin} />} />
+        </Routes>
+      </Router>
+    );
   }
 
   return (

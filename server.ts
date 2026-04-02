@@ -9,6 +9,7 @@ import { emailService } from './lib/emailService.ts';
 import path from 'path';
 
 console.log('Starting server...');
+const IS_PROD = process.env.NODE_ENV === 'production';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,10 +31,12 @@ async function loadEmailConfig() {
   }
 }
 
-// Log para verificar que la consola funciona
-setInterval(() => {
-  console.log('🟢 SERVIDOR ACTIVO - ' + new Date().toLocaleTimeString());
-}, 10000); // Cada 10 segundos
+// Heartbeat solo en desarrollo para evitar ruido en logs de producción
+if (!IS_PROD) {
+  setInterval(() => {
+    console.log('🟢 SERVIDOR ACTIVO - ' + new Date().toLocaleTimeString());
+  }, 10000); // Cada 10 segundos
+}
 
 async function startServer() {
   console.log('startServer() called');
@@ -895,7 +898,7 @@ async function startServer() {
     }
 
     const app = express();
-    const PORT = 3000;
+    const PORT = Number(process.env.PORT || 3000);
 
     // Function to reset yearly metrics and archive old data
   const resetYearlyMetrics = () => {

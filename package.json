@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && node scripts/build-server.mjs",
+    "build": "node ./node_modules/vite/bin/vite.js build && node scripts/build-server.mjs",
     "start": "tsx server.ts",
     "start:prod": "node dist/server.js",
     "build:server": "node scripts/build-server.mjs",
-    "preview": "vite preview",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

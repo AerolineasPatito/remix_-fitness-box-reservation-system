@@ -194,8 +194,33 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const loadYearCalendarClasses = async (year: number) => {
     setCalendarLoading(true);
     try {
-      const data = await api.getClassesCalendar({ year, includeRoster: true });
-      setCalendarYearInstances(normalizeInstances(data || []));
+      const startDate = `${year}-01-01`;
+      const endDate = `${year}-12-31`;
+      const data = await api.getCalendarClasses({
+        startDate,
+        endDate,
+        viewerId: user.id
+      });
+
+      const normalizedCalendar = (Array.isArray(data) ? data : []).map((row: any) => {
+        const participants = Array.isArray(row?.participants) ? row.participants : [];
+        const participantNames = participants
+          .map((p: any) => String(p?.full_name || '').trim())
+          .filter(Boolean);
+        return {
+          ...row,
+          startTime: String(row?.start_time || row?.startTime || '').slice(0, 5),
+          endTime: String(row?.end_time || row?.endTime || '').slice(0, 5),
+          imageUrl: row?.image_url || row?.imageUrl || '',
+          min_capacity: Number(row?.min_capacity ?? 1),
+          max_capacity: Number(row?.max_capacity ?? row?.capacity ?? 0),
+          capacity: Number(row?.capacity ?? row?.max_capacity ?? 0),
+          enrolled_count: Number(row?.reservations_count ?? row?.reserved_count ?? participantNames.length ?? 0),
+          enrolled_students: participantNames
+        } as ClassInstance;
+      });
+
+      setCalendarYearInstances(normalizedCalendar);
     } catch (err: any) {
       logger.error('Error loading calendar classes by year', err);
       setCalendarYearInstances([]);

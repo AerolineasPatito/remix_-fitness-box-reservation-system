@@ -28,14 +28,14 @@ class EmailService {
   private readonly configPath = path.resolve(process.cwd(), 'email-config.json');
 
   setSMTPConfig(config: SMTPConfig) {
-    this.smtpConfig = config;
+    this.smtpConfig = this.normalizeSMTPConfig(config);
     this.transporter = null;
     this.transporterConfigKey = null;
     console.log('SMTP configurado en memoria:', {
-      host: config.host,
-      port: config.port,
-      secure: config.secure,
-      user: config.user
+      host: this.smtpConfig.host,
+      port: this.smtpConfig.port,
+      secure: this.smtpConfig.secure,
+      user: this.smtpConfig.user
     });
   }
 
@@ -48,6 +48,25 @@ class EmailService {
       config.user &&
       config.pass
     );
+  }
+
+  private normalizeSMTPConfig(config: SMTPConfig): SMTPConfig {
+    const host = String(config.host || '').trim().toLowerCase();
+    const port = Number(config.port);
+    let secure = Boolean(config.secure);
+
+    // SMTP standards: 587 must use STARTTLS (secure false + requireTLS).
+    // 465 uses implicit TLS (secure true).
+    if (port === 587) secure = false;
+    if (port === 465) secure = true;
+
+    return {
+      host,
+      port,
+      secure,
+      user: String(config.user || '').trim(),
+      pass: String(config.pass || '')
+    };
   }
 
   private getConfigKey(config: SMTPConfig): string {
@@ -80,7 +99,7 @@ class EmailService {
       return;
     }
 
-    const nextConfig: SMTPConfig = smtpCandidate;
+    const nextConfig: SMTPConfig = this.normalizeSMTPConfig(smtpCandidate);
     const nextKey = this.getConfigKey(nextConfig);
     if (nextKey !== this.transporterConfigKey) {
       this.transporter = null;
@@ -98,18 +117,27 @@ class EmailService {
 
     const configKey = this.getConfigKey(this.smtpConfig);
     if (!this.transporter || this.transporterConfigKey !== configKey) {
+      const requireTLS = this.smtpConfig.port === 587;
       this.transporter = nodemailer.createTransport({
         host: this.smtpConfig.host,
         port: this.smtpConfig.port,
         secure: this.smtpConfig.secure,
+        requireTLS,
+        // cPanel environments often fail on IPv6 routes for some providers.
+        // Force IPv4 to avoid ENETUNREACH on AAAA records.
+        family: 4,
         auth: {
           user: this.smtpConfig.user,
           pass: this.smtpConfig.pass
         },
+        tls: {
+          servername: this.smtpConfig.host,
+          minVersion: 'TLSv1.2'
+        },
         connectionTimeout: 10000,
         greetingTimeout: 10000,
         socketTimeout: 10000
-      });
+      } as any);
       this.transporterConfigKey = configKey;
     }
 

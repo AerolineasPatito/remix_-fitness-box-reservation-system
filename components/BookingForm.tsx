@@ -70,14 +70,30 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
 
   const runReservation = async () => {
     const resData = await api.createReservation(user.id, inst.id);
+    const resolvedTicketId = String(
+      resData?.reservationId ||
+        resData?.reservation_id ||
+        resData?.ticketId ||
+        resData?.ticket_id ||
+        resData?.reservation?.id ||
+        resData?.id ||
+        ''
+    ).trim();
 
     const bookingPayload = {
       ...resData,
+      id: resolvedTicketId || String(resData?.id || '').trim(),
+      ticketId: resolvedTicketId,
+      reservationId: resolvedTicketId || String(resData?.reservationId || '').trim(),
       tipoClase: inst.type,
       fecha: inst.date,
       horaInicio: inst.startTime,
       horaFin: inst.endTime,
-      email: user.email
+      email: user.email,
+      reservation: {
+        ...(resData?.reservation || {}),
+        id: String(resData?.reservation?.id || resolvedTicketId).trim()
+      }
     };
 
     await Promise.resolve(onSuccess(bookingPayload));

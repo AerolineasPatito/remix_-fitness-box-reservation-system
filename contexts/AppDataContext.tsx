@@ -60,9 +60,22 @@ const defaultSettings: SystemSettings = {
 const normalizeClasses = (rows: any[]): ClassInstance[] =>
   (Array.isArray(rows) ? rows : []).map((d: any) => ({
     ...d,
+    date: String(d.date || ''),
     startTime: String(d.start_time || d.startTime || '').substring(0, 5),
     endTime: String(d.end_time || d.endTime || '').substring(0, 5),
-    imageUrl: d.image_url || d.imageUrl || ''
+    imageUrl: d.image_url || d.imageUrl || '',
+    status: d.status || 'active',
+    min_capacity: Number(d.min_capacity || d.minCapacity || 1),
+    max_capacity: Number(d.max_capacity || d.maxCapacity || d.capacity || 0),
+    capacity: Number(d.capacity || d.max_capacity || d.maxCapacity || 0),
+    enrolled_count: Number(d.enrolled_count || d.reserved_count || 0),
+    enrolled_students: Array.isArray(d.enrolled_students)
+      ? d.enrolled_students
+      : Array.isArray(d.roster)
+        ? d.roster.map((p: any) => String(p?.full_name || '').trim()).filter(Boolean)
+        : typeof d.enrolled_students === 'string'
+          ? d.enrolled_students.split('||').filter(Boolean)
+          : []
   }));
 
 interface AppDataProviderProps {
@@ -188,7 +201,16 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
     let timer: any = null;
     const runPolling = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      await Promise.all([refreshClasses(), refreshAvailability(), refreshSettings()]);
+      const tasks: Array<Promise<void>> = [
+        refreshClassTypes(),
+        refreshClasses(),
+        refreshAvailability(),
+        refreshSettings()
+      ];
+      if (role === 'coach' || role === 'admin') {
+        tasks.push(refreshPackages());
+      }
+      await Promise.all(tasks);
     };
 
     const startPolling = () => {
@@ -215,7 +237,7 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
         document.removeEventListener('visibilitychange', handleVisibility);
       }
     };
-  }, [enabled, pollIntervalMs, refreshAvailability, refreshClasses, refreshSettings]);
+  }, [enabled, pollIntervalMs, refreshAvailability, refreshClassTypes, refreshClasses, refreshPackages, refreshSettings, role]);
 
   const value = useMemo(
     () => ({

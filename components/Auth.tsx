@@ -40,8 +40,12 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       if (isLogin) {
         const data = await api.login(email, password);
         if (data.error) throw new Error(data.error);
-        localStorage.setItem('focus_session', JSON.stringify(data.session));
-        onLogin(data.session);
+        const sessionPayload = data?.session || (data?.user ? { user: data.user } : null);
+        if (!sessionPayload?.user?.id) {
+          throw new Error('Respuesta invalida del servidor al iniciar sesion.');
+        }
+        localStorage.setItem('focus_session', JSON.stringify(sessionPayload));
+        onLogin(sessionPayload);
         window.location.replace('/');
       } else {
         const data = await api.register(email, password, fullName, whatsappPhone);
@@ -53,10 +57,13 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           return;
         }
         
-        // Si no requiere verificación (flujo antiguo), continuar normalmente
-        localStorage.setItem('focus_session', JSON.stringify(data.session));
-        onLogin(data.session);
-        window.location.replace('/');
+        // Si no requiere verificacion (flujo antiguo), continuar normalmente
+        const sessionPayload = data?.session || (data?.user ? { user: data.user } : null);
+        if (sessionPayload?.user?.id) {
+          localStorage.setItem('focus_session', JSON.stringify(sessionPayload));
+          onLogin(sessionPayload);
+          window.location.replace('/');
+        }
       }
     } catch (err: any) {
       setError(getFriendlyErrorMessage(err, 'No pudimos iniciar tu sesión. Intenta de nuevo.'));
@@ -249,3 +256,4 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
     </div>
   );
 };
+

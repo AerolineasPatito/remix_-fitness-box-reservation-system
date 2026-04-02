@@ -36,7 +36,7 @@ const handleUnauthorized = () => {
   }
 };
 
-const handleResponse = async (res: Response) => {
+const handleResponse = async (res: Response, options?: { suppressUnauthorizedRedirect?: boolean }) => {
   const contentType = res.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {
     const data = await res.json();
@@ -47,7 +47,7 @@ const handleResponse = async (res: Response) => {
         message: data?.message || data?.error,
         status: res.status
       });
-      if (res.status === 401) {
+      if (res.status === 401 && !options?.suppressUnauthorizedRedirect) {
         handleUnauthorized();
       }
       throw normalizedError;
@@ -61,7 +61,7 @@ const handleResponse = async (res: Response) => {
       status: res.status,
       message: `HTTP ${res.status}`
     });
-    if (res.status === 401) {
+    if (res.status === 401 && !options?.suppressUnauthorizedRedirect) {
       handleUnauthorized();
     }
     throw normalizedError;
@@ -154,7 +154,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    return handleResponse(res);
+    return handleResponse(res, { suppressUnauthorizedRedirect: true });
   },
   register: async (email: string, password?: string, fullName?: string, whatsappPhone?: string) => {
     const res = await fetch('/api/auth/register', {
@@ -162,7 +162,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, fullName, whatsappPhone })
     });
-    return handleResponse(res);
+    return handleResponse(res, { suppressUnauthorizedRedirect: true });
   },
   createReservation: async (userId: string, classId: string) => {
     const res = await fetch('/api/reservations', {

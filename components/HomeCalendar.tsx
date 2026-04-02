@@ -23,7 +23,7 @@ type CalendarClass = {
   class_status: 'available' | 'full' | 'cancelled' | 'finished';
   reservations_count: number;
   remaining_spots: number;
-  participants: Array<{
+  participants?: Array<{
     reservation_id: string;
     user_id: string;
     full_name: string;
@@ -37,6 +37,60 @@ type CalendarClass = {
     email?: string;
     whatsapp_phone?: string;
   } | null;
+};
+
+const normalizeCalendarRows = (rows: any[]): CalendarClass[] => {
+  const now = new Date();
+  return (Array.isArray(rows) ? rows : []).map((raw) => {
+    const participants = Array.isArray(raw?.participants)
+      ? raw.participants
+      : Array.isArray(raw?.roster)
+        ? raw.roster.map((p: any) => ({
+            reservation_id: String(p?.reservation_id || ''),
+            user_id: String(p?.user_id || p?.id || ''),
+            full_name: String(p?.full_name || 'Alumno'),
+            email: p?.email || '',
+            whatsapp_phone: p?.whatsapp_phone || ''
+          }))
+        : [];
+    const reservationsCount = Number(raw?.reservations_count ?? raw?.reserved_count ?? participants.length ?? 0);
+    const maxCapacity = Number(raw?.max_capacity ?? raw?.capacity ?? 0);
+    const rawStatus = String(raw?.status || '').toLowerCase();
+    const rawRealtimeStatus = String(raw?.real_time_status || '').toLowerCase();
+    const endDateTime = new Date(`${String(raw?.date || '')}T${String(raw?.end_time || '00:00').slice(0, 5)}:00`);
+
+    let classStatus: CalendarClass['class_status'] = raw?.class_status || 'available';
+    if (
+      rawStatus === 'canceled' ||
+      rawStatus === 'cancelled' ||
+      rawRealtimeStatus === 'canceled' ||
+      rawRealtimeStatus === 'cancelled'
+    ) {
+      classStatus = 'cancelled';
+    } else if (Number.isFinite(endDateTime.getTime()) && now.getTime() >= endDateTime.getTime()) {
+      classStatus = 'finished';
+    } else if (maxCapacity > 0 && reservationsCount >= maxCapacity) {
+      classStatus = 'full';
+    } else if (!['available', 'full', 'cancelled', 'finished'].includes(String(classStatus))) {
+      classStatus = 'available';
+    }
+
+    return {
+      ...raw,
+      date: String(raw?.date || ''),
+      start_time: String(raw?.start_time || '00:00'),
+      end_time: String(raw?.end_time || '00:00'),
+      max_capacity: maxCapacity,
+      min_capacity: Number(raw?.min_capacity ?? 1),
+      status: String(raw?.status || 'active'),
+      real_time_status: String(raw?.real_time_status || ''),
+      class_status: classStatus,
+      reservations_count: reservationsCount,
+      remaining_spots: Math.max(0, Number(raw?.remaining_spots ?? maxCapacity - reservationsCount)),
+      participants,
+      viewer_reservation: raw?.viewer_reservation || null
+    } as CalendarClass;
+  });
 };
 
 interface HomeCalendarProps {
@@ -130,7 +184,7 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
         endDate: formatDate(range.end),
         viewerId: user.id
       });
-      setCalendarRows(Array.isArray(rows) ? rows : []);
+      setCalendarRows(normalizeCalendarRows(rows || []));
     } catch (error: any) {
       logger.error('Error loading home calendar', error);
       setCalendarRows([]);
@@ -217,6 +271,7 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
   };
 
   const renderClassCard = (classRow: CalendarClass) => {
+    const participants = Array.isArray(classRow.participants) ? classRow.participants : [];
     const isEnrolled = Boolean(classRow.viewer_reservation);
     const isDisabled = isStudentView ? isClassDisabledForStudent(classRow) : false;
     const needsMinAlert = isCoachView && classRow.class_status === 'available' && classRow.reservations_count < classRow.min_capacity;
@@ -259,8 +314,8 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
               <p className="text-[10px] font-black text-amber-600 uppercase">Mínimo no alcanzado</p>
             )}
             <div className="text-[10px] text-zinc-500">
-              {classRow.participants.length > 0
-                ? classRow.participants.map((p) => p.full_name).join(', ')
+              {participants.length > 0
+                ? participants.map((p) => p.full_name).join(', ')
                 : 'Sin inscritos'}
             </div>
           </div>
@@ -292,14 +347,16 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
               <div className="rounded-xl bg-zinc-50 border border-zinc-100 p-3">Cupo: <strong>{selectedClass.reservations_count}/{selectedClass.max_capacity}</strong></div>
               <div className="rounded-xl bg-zinc-50 border border-zinc-100 p-3">Mínimo requerido: <strong>{selectedClass.min_capacity}</strong></div>
             </div>
-            <div className="mt-4 rounded-xl border border-zinc-100 p-3">
-              <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Alumnos inscritos</p>
-              <p className="mt-2 text-sm text-zinc-700">
-                {selectedClass.participants.length > 0
-                  ? selectedClass.participants.map((p) => p.full_name).join(', ')
-                  : 'Sin inscritos'}
-              </p>
-            </div>
+            {isCoachView && (
+              <div className="mt-4 rounded-xl border border-zinc-100 p-3">
+                <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Alumnos inscritos</p>
+                <p className="mt-2 text-sm text-zinc-700">
+                  {(selectedClass.participants || []).length > 0
+                    ? (selectedClass.participants || []).map((p) => p.full_name).join(', ')
+                    : 'Sin inscritos'}
+                </p>
+              </div>
+            )}
             <div className="mt-6 flex gap-3">
               <button
                 type="button"

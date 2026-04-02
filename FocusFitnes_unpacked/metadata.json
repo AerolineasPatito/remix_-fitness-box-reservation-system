@@ -1,0 +1,5 @@
+{
+  "name": "Remix: Fitness Box Reservation System",
+  "description": "A comprehensive V1 reservation system for a fitness studio, built with Node.js, Express, and React, featuring schedule management and capacity tracking.",
+  "requestFramePermissions": []
+}

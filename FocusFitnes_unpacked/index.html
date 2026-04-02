@@ -1,0 +1,70 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Focus Fitness - Movement Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Flatpickr CSS para Material Theme -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Bebas+Neue&display=swap');
+      :root {
+        --brand-blue: #3794a4;
+      }
+      body { 
+        font-family: 'Plus Jakarta Sans', sans-serif; 
+        background-color: #ffffff;
+        color: #18181b;
+      }
+      .font-bebas { font-family: 'Bebas Neue', cursive; }
+      .text-brand { color: var(--brand-blue); }
+      .bg-brand { background-color: var(--brand-blue); }
+      .border-brand { border-color: var(--brand-blue); }
+      .hover-bg-brand:hover { background-color: #2e7c8a; }
+      
+      .hide-scrollbar::-webkit-scrollbar { display: none; }
+      .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      /* Custom Flatpickr Overrides for Focus Fitness */
+      .flatpickr-calendar {
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+        border: none !important;
+        border-radius: 20px !important;
+        padding: 10px;
+      }
+      .flatpickr-day.selected {
+        background: var(--brand-blue) !important;
+        border-color: var(--brand-blue) !important;
+      }
+      .flatpickr-months .flatpickr-month {
+        color: #18181b !important;
+        fill: #18181b !important;
+      }
+      .flatpickr-current-month .flatpickr-monthDropdown-months {
+        font-weight: 800 !important;
+        text-transform: uppercase;
+      }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-white text-zinc-900 selection:bg-cyan-100 selection:text-cyan-900">
+    <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

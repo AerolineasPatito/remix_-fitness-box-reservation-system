@@ -1,0 +1,44 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  scrollbar-gutter: stable;
+  -webkit-text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input[type='number'],
+input[type='date'],
+input[type='time'],
+select,
+button {
+  min-height: 44px;
+}
+
+textarea {
+  min-height: 88px;
+}
+

@@ -4771,12 +4771,12 @@ async function startServer() {
         return res.sendFile(path.join(__dirname, 'index.html'));
       });
     } else {
-      app.use(express.static(__dirname));
+      app.use(express.static(path.join(__dirname, 'dist')));
       app.get('*', (req, res) => {
         if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'La ruta de la API no existe.' });
         }
-        return res.sendFile(path.join(__dirname, 'index.html'));
+        return res.sendFile(path.join(__dirname, 'dist', 'index.html'));
       });
     }
   });

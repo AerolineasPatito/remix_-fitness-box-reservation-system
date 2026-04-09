@@ -1,5 +1,10 @@
 import React from 'react';
-import { calculateCancellationDeadline, formatCancellationDeadline, CancellationPolicySettings } from '../lib/cancellationPolicy.ts';
+import {
+  calculateCancellationDeadline,
+  formatCancellationDeadline,
+  CancellationPolicySettings,
+  DEFAULT_APP_TIMEZONE
+} from '../lib/cancellationPolicy.ts';
 
 type ReservationLike = {
   id?: string;
@@ -33,9 +38,10 @@ export const ReservationCancellationModal: React.FC<ReservationCancellationModal
   const deadline = calculateCancellationDeadline(
     reservation.date,
     String(reservation.start_time || '').slice(0, 5),
-    settings
+    settings,
+    DEFAULT_APP_TIMEZONE
   );
-  const deadlineLabel = formatCancellationDeadline(deadline);
+  const deadlineLabel = formatCancellationDeadline(deadline, DEFAULT_APP_TIMEZONE);
   const isLate = Date.now() > deadline.getTime();
 
   return (
@@ -87,4 +93,3 @@ export const ReservationCancellationModal: React.FC<ReservationCancellationModal
     </div>
   );
 };
-

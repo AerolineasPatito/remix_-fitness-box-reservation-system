@@ -13,7 +13,8 @@ import { emailService } from './lib/emailService.ts';
 import crypto from 'node:crypto';
 import {
   calculateCancellationDeadline as calculateCancellationDeadlineTz,
-  DEFAULT_APP_TIMEZONE
+  DEFAULT_APP_TIMEZONE,
+  buildDateInTimeZone
 } from './lib/cancellationPolicy.ts';
 
 dotenv.config({ path: '.env.local' });
@@ -23,6 +24,8 @@ process.env.TZ = process.env.APP_TIMEZONE || DEFAULT_APP_TIMEZONE;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT || 3000);
 const APP_TIMEZONE = process.env.APP_TIMEZONE || DEFAULT_APP_TIMEZONE;
+const AUTO_CANCEL_ENABLED = String(process.env.AUTO_CANCEL_ENABLED ?? 'true').trim().toLowerCase() !== 'false';
+const AUTO_CANCEL_INTERVAL_MS = Math.max(60_000, Number(process.env.AUTO_CANCEL_INTERVAL_MS || 300_000));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -236,6 +239,281 @@ const sanitizeProfile = (profile: any) => {
   if (!profile) return null;
   const { password_hash, ...safe } = profile;
   return safe;
+};
+
+let autoCancelJobRunning = false;
+let autoCancelTimer: NodeJS.Timeout | null = null;
+
+const cancelClassForMinimum = async (classId: string) => {
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const classInfoRes = await client.query(
+      `
+      SELECT id, type, date, start_time, end_time, COALESCE(min_capacity, 1) AS min_capacity
+      FROM classes
+      WHERE id = $1
+        AND status = 'active'
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [classId]
+    );
+    const classInfo: any = classInfoRes.rows[0];
+    if (!classInfo) {
+      await client.query('ROLLBACK');
+      return { canceled: false, reason: 'not_active' as const };
+    }
+
+    const reservationsResult = await client.query(
+      `
+      SELECT
+        r.id AS reservation_id,
+        r.user_id,
+        r.suscripcion_id,
+        r.beneficiario_id,
+        p.full_name,
+        p.email,
+        p.whatsapp_phone
+      FROM reservations r
+      JOIN profiles p ON p.id = r.user_id
+      WHERE r.class_id = $1
+        AND r.status = 'active'
+        AND r.deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [classId]
+    );
+    const activeReservations: any[] = reservationsResult.rows || [];
+    const minCapacity = Math.max(1, Number(classInfo.min_capacity || 1));
+    if (activeReservations.length >= minCapacity) {
+      await client.query('ROLLBACK');
+      return { canceled: false, reason: 'threshold_met' as const };
+    }
+
+    const classUpdate = await client.query(
+      `
+      UPDATE classes
+      SET status = 'canceled',
+          real_time_status = 'canceled',
+          cancellation_reason = 'cancelacion_minimo_automatico',
+          cancellation_source = 'system',
+          canceled_by = 'system',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND status = 'active'
+        AND deleted_at IS NULL
+    `,
+      [classId]
+    );
+
+    if (!classUpdate.rowCount) {
+      await client.query('ROLLBACK');
+      return { canceled: false, reason: 'already_canceled' as const };
+    }
+
+    await client.query(
+      `
+      UPDATE reservations
+      SET status = 'cancelled',
+          cancellation_reason = 'cancelacion_minimo_automatico',
+          cancellation_notified_to_student = 1,
+          cancellation_notified_to_business = 1,
+          cancellation_notified_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE class_id = $1
+        AND status = 'active'
+        AND deleted_at IS NULL
+    `,
+      [classId]
+    );
+
+    for (const reservation of activeReservations) {
+      if (reservation.beneficiario_id) {
+        await client.query(
+          `
+          UPDATE suscripcion_beneficiarios
+          SET clases_restantes = clases_restantes + 1,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+          [reservation.beneficiario_id]
+        );
+      }
+
+      if (reservation.suscripcion_id) {
+        await client.query(
+          `
+          UPDATE suscripciones_alumno
+          SET clases_restantes = clases_restantes + 1,
+              clases_consumidas = GREATEST(clases_consumidas - 1, 0),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+          [reservation.suscripcion_id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const affectedStudentIds = Array.from(
+      new Set(activeReservations.map((r) => String(r.user_id || '').trim()).filter(Boolean))
+    );
+    for (const studentId of affectedStudentIds) {
+      await syncStudentCredits(String(studentId));
+    }
+
+    const businessEmail = await getBusinessNotificationEmail();
+    const notifiedLines = activeReservations.map(
+      (row) => `- ${row.full_name || 'Alumno'} — ${row.email || 'sin correo'} — ${row.whatsapp_phone || 'sin WhatsApp'}`
+    );
+
+    if (businessEmail) {
+      void emailService
+        .sendEmail({
+          to: businessEmail,
+          subject: `Clase cancelada por cupo mínimo - ${classInfo.type}`,
+          html: buildEmailLayout(
+            'Clase cancelada automáticamente',
+            'Alerta interna',
+            `
+              <p style="color:#374151;margin:0 0 8px;"><strong>Clase:</strong> ${classInfo.type}</p>
+              <p style="color:#374151;margin:0 0 8px;"><strong>Horario:</strong> ${classInfo.date} ${String(classInfo.start_time || '').slice(0, 5)} - ${String(classInfo.end_time || '').slice(0, 5)}</p>
+              <p style="color:#374151;margin:0 0 8px;"><strong>Origen:</strong> Sistema</p>
+              <p style="color:#374151;margin:0 0 8px;"><strong>Motivo:</strong> No alcanzó el mínimo requerido (${minCapacity}).</p>
+              <p style="color:#374151;margin:0 0 8px;"><strong>Inscritos:</strong> ${activeReservations.length}</p>
+              <p style="color:#111827;margin:14px 0 8px;"><strong>Alumnos notificados:</strong></p>
+              <pre style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:0;">${notifiedLines.length ? notifiedLines.join('\n') : '- Sin alumnos inscritos'}</pre>
+            `
+          )
+        })
+        .catch((err) => console.error('Error correo auto-cancelación al negocio:', err?.message || err));
+    }
+
+    for (const participant of activeReservations) {
+      if (!participant.email) continue;
+      void emailService
+        .sendEmail({
+          to: participant.email,
+          subject: `Tu clase fue cancelada - ${classInfo.type}`,
+          html: buildEmailLayout(
+            'Clase cancelada',
+            'Actualización de clase',
+            `
+              <p style="color:#374151;line-height:1.6;margin:0 0 10px;">Hola ${participant.full_name || 'atleta'},</p>
+              <p style="color:#374151;line-height:1.6;margin:0 0 10px;">Te avisamos que la clase <strong>${classInfo.type}</strong> (${classInfo.date} ${String(classInfo.start_time || '').slice(0, 5)} - ${String(classInfo.end_time || '').slice(0, 5)}) fue cancelada automáticamente por no alcanzar el mínimo requerido de ${minCapacity} participantes.</p>
+              <p style="color:#374151;margin:0;">Tu crédito fue devuelto automáticamente.</p>
+            `
+          )
+        })
+        .catch((err) => console.error('Error correo auto-cancelación a alumno:', err?.message || err));
+    }
+
+    return { canceled: true, reservationCount: activeReservations.length };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const runAutoCancellationByMinimum = async () => {
+  if (!AUTO_CANCEL_ENABLED) return;
+  if (autoCancelJobRunning) {
+    console.log('[auto-cancel:min] skipped: previous run still active');
+    return;
+  }
+
+  autoCancelJobRunning = true;
+  const stats = { evaluated: 0, canceled: 0, errors: 0 };
+
+  try {
+    const settings = await getSettings();
+    const now = new Date();
+    const todayIso = now.toLocaleDateString('en-CA', { timeZone: APP_TIMEZONE });
+    const candidates = await query<any>(
+      `
+      SELECT
+        c.id,
+        c.type,
+        c.date,
+        c.start_time,
+        c.end_time,
+        COALESCE(c.min_capacity, 1) AS min_capacity,
+        COUNT(r.id)::int AS inscritos
+      FROM classes c
+      LEFT JOIN reservations r
+        ON r.class_id = c.id
+       AND r.status = 'active'
+       AND r.deleted_at IS NULL
+      WHERE c.status = 'active'
+        AND c.deleted_at IS NULL
+        AND c.date >= $1
+      GROUP BY c.id, c.type, c.date, c.start_time, c.end_time, c.min_capacity
+      ORDER BY c.date ASC, c.start_time ASC
+    `,
+      [todayIso]
+    );
+
+    for (const classRow of candidates) {
+      stats.evaluated += 1;
+      try {
+        const deadline = calculateCancellationDeadlineTz(
+          String(classRow.date || ''),
+          String(classRow.start_time || '').slice(0, 5),
+          settings,
+          APP_TIMEZONE
+        );
+        const classStart = buildDateInTimeZone(
+          String(classRow.date || ''),
+          String(classRow.start_time || '').slice(0, 5),
+          APP_TIMEZONE
+        );
+        const minCapacity = Math.max(1, Number(classRow.min_capacity || 1));
+        const enrolled = Math.max(0, Number(classRow.inscritos || 0));
+
+        if (enrolled >= minCapacity) continue;
+        if (now.getTime() < deadline.getTime()) continue;
+        if (now.getTime() >= classStart.getTime()) continue;
+
+        const result = await cancelClassForMinimum(String(classRow.id));
+        if (result.canceled) {
+          stats.canceled += 1;
+        }
+      } catch (error: any) {
+        stats.errors += 1;
+        console.error('[auto-cancel:min] class-error', {
+          classId: classRow?.id,
+          message: error?.message || String(error)
+        });
+      }
+    }
+  } catch (error: any) {
+    stats.errors += 1;
+    console.error('[auto-cancel:min] run-error', { message: error?.message || String(error) });
+  } finally {
+    autoCancelJobRunning = false;
+    console.log('[auto-cancel:min] run-summary', stats);
+  }
+};
+
+const startAutoCancelScheduler = () => {
+  if (!AUTO_CANCEL_ENABLED) {
+    console.log('[auto-cancel:min] disabled by AUTO_CANCEL_ENABLED=false');
+    return;
+  }
+  if (autoCancelTimer) return;
+  void runAutoCancellationByMinimum();
+  autoCancelTimer = setInterval(() => {
+    void runAutoCancellationByMinimum();
+  }, AUTO_CANCEL_INTERVAL_MS);
+  console.log('[auto-cancel:min] scheduler started', {
+    intervalMs: AUTO_CANCEL_INTERVAL_MS,
+    timezone: APP_TIMEZONE
+  });
 };
 
 app.get('/api/system-settings/public', async (_req, res) => {
@@ -3788,6 +4066,7 @@ const start = async () => {
     await ensureAdmin();
     app.listen(PORT, () => {
       console.log(`PostgreSQL server running on http://localhost:${PORT}`);
+      startAutoCancelScheduler();
     });
   } catch (error) {
     console.error('Failed to start PostgreSQL server:', error);

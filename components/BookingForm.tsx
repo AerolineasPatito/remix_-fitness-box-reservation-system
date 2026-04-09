@@ -2,7 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ClassInstance, Profile } from '../types.ts';
 import { api } from '../lib/api.ts';
-import { calculateCancellationDeadline, formatCancellationDeadline, CancellationPolicySettings } from '../lib/cancellationPolicy.ts';
+import {
+  calculateCancellationDeadline,
+  formatCancellationDeadline,
+  CancellationPolicySettings,
+  DEFAULT_APP_TIMEZONE
+} from '../lib/cancellationPolicy.ts';
 import { useAppData } from '../contexts/AppDataContext.tsx';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 
@@ -73,8 +78,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
 
   const cancellationDeadlineLabel = useMemo(() => {
     if (!inst) return '';
-    const deadline = calculateCancellationDeadline(inst.date, inst.startTime, policySettings);
-    return formatCancellationDeadline(deadline);
+    const deadline = calculateCancellationDeadline(inst.date, inst.startTime, policySettings, DEFAULT_APP_TIMEZONE);
+    return formatCancellationDeadline(deadline, DEFAULT_APP_TIMEZONE);
   }, [inst, policySettings]);
 
   const classMinParticipants = Math.max(1, Number(inst?.min_capacity || 1));

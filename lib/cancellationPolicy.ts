@@ -46,7 +46,7 @@ const getTimeZoneOffsetMs = (date: Date, timeZone: string) => {
   return asUtc - date.getTime();
 };
 
-const buildDateInTimeZone = (dateIso: string, hhmm: string, timeZone: string) => {
+export const buildDateInTimeZone = (dateIso: string, hhmm: string, timeZone = DEFAULT_APP_TIMEZONE) => {
   const [year, month, day] = String(dateIso || '').split('-').map(Number);
   const [hour, minute] = String(hhmm || '00:00').split(':').map(Number);
   const utcGuess = Date.UTC(year, (month || 1) - 1, day || 1, hour || 0, minute || 0, 0);

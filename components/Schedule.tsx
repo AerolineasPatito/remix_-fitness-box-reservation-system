@@ -4,7 +4,12 @@ import { ClassInstance, AvailabilityState, Profile } from '../types.ts';
 import { ClassStatusBadge } from './ClassStatusBadge.tsx';
 import { resolveClassTypeFromSlug, slugifyClassType } from '../lib/routeHelpers.ts';
 import { api } from '../lib/api.ts';
-import { calculateCancellationDeadline, formatCancellationDeadline, CancellationPolicySettings } from '../lib/cancellationPolicy.ts';
+import {
+  calculateCancellationDeadline,
+  formatCancellationDeadline,
+  CancellationPolicySettings,
+  DEFAULT_APP_TIMEZONE
+} from '../lib/cancellationPolicy.ts';
 import { useAppData } from '../contexts/AppDataContext.tsx';
 
 interface ScheduleProps {
@@ -144,7 +149,8 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
     const deadline = calculateCancellationDeadline(
       reservation.date,
       String(reservation.start_time).slice(0, 5),
-      publicSettings
+      publicSettings,
+      DEFAULT_APP_TIMEZONE
     );
     const now = new Date();
     const isLate = now.getTime() > deadline.getTime();
@@ -152,7 +158,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
       reservationId: reservation.id,
       isLate,
       limitHours: publicSettings.cancellation_limit_hours,
-      deadlineLabel: formatCancellationDeadline(deadline)
+      deadlineLabel: formatCancellationDeadline(deadline, DEFAULT_APP_TIMEZONE)
     });
   };
 

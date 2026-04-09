@@ -251,7 +251,7 @@ const cancelClassForMinimum = async (classId: string) => {
 
     const classInfoRes = await client.query(
       `
-      SELECT id, type, date, start_time, end_time, COALESCE(min_capacity, 1) AS min_capacity
+      SELECT id, type, date, start_time, end_time, COALESCE(min_capacity, 1) AS min_capacity, COALESCE(is_event, 0) AS is_event
       FROM classes
       WHERE id = $1
         AND status = 'active'
@@ -264,6 +264,10 @@ const cancelClassForMinimum = async (classId: string) => {
     if (!classInfo) {
       await client.query('ROLLBACK');
       return { canceled: false, reason: 'not_active' as const };
+    }
+    if (Number(classInfo.is_event || 0) === 1) {
+      await client.query('ROLLBACK');
+      return { canceled: false, reason: 'event_class' as const };
     }
 
     const reservationsResult = await client.query(
@@ -443,6 +447,7 @@ const runAutoCancellationByMinimum = async () => {
         c.start_time,
         c.end_time,
         COALESCE(c.min_capacity, 1) AS min_capacity,
+        COALESCE(c.is_event, 0) AS is_event,
         COUNT(r.id)::int AS inscritos
       FROM classes c
       LEFT JOIN reservations r
@@ -451,8 +456,9 @@ const runAutoCancellationByMinimum = async () => {
        AND r.deleted_at IS NULL
       WHERE c.status = 'active'
         AND c.deleted_at IS NULL
+        AND COALESCE(c.is_event, 0) = 0
         AND c.date >= $1
-      GROUP BY c.id, c.type, c.date, c.start_time, c.end_time, c.min_capacity
+      GROUP BY c.id, c.type, c.date, c.start_time, c.end_time, c.min_capacity, c.is_event
       ORDER BY c.date ASC, c.start_time ASC
     `,
       [todayIso]
@@ -1143,6 +1149,7 @@ app.post('/api/classes', async (req, res) => {
     const endTime = String(req.body?.end_time || req.body?.endTime || '').trim().slice(0, 5);
     const minCapacity = Number(req.body?.min_capacity ?? req.body?.minCapacity ?? 1);
     const maxCapacity = Number(req.body?.max_capacity ?? req.body?.maxCapacity ?? req.body?.capacity ?? 8);
+    const isEvent = Number(req.body?.is_event ?? req.body?.isEvent ?? 0) === 1 ? 1 : 0;
     const createdBy = String(req.body?.created_by || req.body?.createdBy || '').trim() || null;
 
     if (!classTypeId || !date || !startTime || !endTime) {
@@ -1159,11 +1166,11 @@ app.post('/api/classes', async (req, res) => {
     await query(
       `
       INSERT INTO classes (
-        id, type, class_type_id, date, start_time, end_time, min_capacity, max_capacity, capacity, status, real_time_status, created_by, created_at, updated_at
+        id, type, class_type_id, date, start_time, end_time, is_event, min_capacity, max_capacity, capacity, status, real_time_status, created_by, created_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'active', 'scheduled', $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, 'active', 'scheduled', $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `,
-      [id, classType.name, classTypeId, date, startTime, endTime, minCapacity, maxCapacity, createdBy]
+      [id, classType.name, classTypeId, date, startTime, endTime, isEvent, minCapacity, maxCapacity, createdBy]
     );
 
     const created = await getOne(`SELECT * FROM classes WHERE id = $1`, [id]);
@@ -1181,6 +1188,7 @@ app.post('/api/classes/recurring', async (req, res) => {
     const endTime = String(req.body?.end_time || req.body?.endTime || '').trim().slice(0, 5);
     const minCapacity = Number(req.body?.min_capacity ?? req.body?.minCapacity ?? 1);
     const maxCapacity = Number(req.body?.max_capacity ?? req.body?.maxCapacity ?? req.body?.capacity ?? 8);
+    const isEvent = Number(req.body?.is_event ?? req.body?.isEvent ?? 0) === 1 ? 1 : 0;
     const weeks = Math.max(1, Number(req.body?.weeks || req.body?.durationWeeks || 1));
     const recurrenceType = String(req.body?.recurrenceType || 'weekly');
     const weekdays: number[] = Array.isArray(req.body?.weekdays) ? req.body.weekdays.map((n: any) => Number(n)) : [];
@@ -1221,11 +1229,11 @@ app.post('/api/classes/recurring', async (req, res) => {
       await query(
         `
         INSERT INTO classes (
-          id, type, class_type_id, date, start_time, end_time, min_capacity, max_capacity, capacity, status, real_time_status, created_by, created_at, updated_at
+          id, type, class_type_id, date, start_time, end_time, is_event, min_capacity, max_capacity, capacity, status, real_time_status, created_by, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'active', 'scheduled', $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, 'active', 'scheduled', $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `,
-        [id, classType.name, classTypeId, date, startTime, endTime, minCapacity, maxCapacity, createdBy]
+        [id, classType.name, classTypeId, date, startTime, endTime, isEvent, minCapacity, maxCapacity, createdBy]
       );
       created.push({ id, date });
     }
@@ -1245,7 +1253,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
 
     const classInfoResult = await client.query(
       `
-      SELECT id, type, date, start_time, end_time
+      SELECT id, type, date, start_time, end_time, COALESCE(is_event, 0) AS is_event
       FROM classes
       WHERE id = $1 AND deleted_at IS NULL
       FOR UPDATE
@@ -1308,30 +1316,33 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
       [classId]
     );
 
-    for (const reservation of activeReservations) {
-      if (reservation.beneficiario_id) {
-        await client.query(
-          `
-          UPDATE suscripcion_beneficiarios
-          SET clases_restantes = clases_restantes + 1,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1
-        `,
-          [reservation.beneficiario_id]
-        );
-      }
+    const isEventClass = Number(classInfo.is_event || 0) === 1;
+    if (!isEventClass) {
+      for (const reservation of activeReservations) {
+        if (reservation.beneficiario_id) {
+          await client.query(
+            `
+            UPDATE suscripcion_beneficiarios
+            SET clases_restantes = clases_restantes + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+          `,
+            [reservation.beneficiario_id]
+          );
+        }
 
-      if (reservation.suscripcion_id) {
-        await client.query(
-          `
-          UPDATE suscripciones_alumno
-          SET clases_restantes = clases_restantes + 1,
-              clases_consumidas = GREATEST(clases_consumidas - 1, 0),
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1
-        `,
-          [reservation.suscripcion_id]
-        );
+        if (reservation.suscripcion_id) {
+          await client.query(
+            `
+            UPDATE suscripciones_alumno
+            SET clases_restantes = clases_restantes + 1,
+                clases_consumidas = GREATEST(clases_consumidas - 1, 0),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+          `,
+            [reservation.suscripcion_id]
+          );
+        }
       }
     }
 
@@ -1389,7 +1400,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
         .catch((err) => console.error('Error correo de cancelación a alumno:', err?.message || err));
     }
 
-    res.json({ success: true, refunded_students: affectedStudentIds.length });
+    res.json({ success: true, refunded_students: isEventClass ? 0 : affectedStudentIds.length });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo cancelar la clase.' });
@@ -1404,6 +1415,23 @@ app.delete('/api/classes/:id', async (req, res) => {
     const classId = req.params.id;
     await client.query('BEGIN');
 
+    const classInfoResult = await client.query(
+      `
+      SELECT id, COALESCE(is_event, 0) AS is_event
+      FROM classes
+      WHERE id = $1
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [classId]
+    );
+    const classInfo: any = classInfoResult.rows[0];
+    if (!classInfo) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos la clase solicitada.' });
+    }
+    const isEventClass = Number(classInfo.is_event || 0) === 1;
+
     const activeReservations = await client.query(
       `
       SELECT id, user_id, suscripcion_id, beneficiario_id
@@ -1416,18 +1444,20 @@ app.delete('/api/classes/:id', async (req, res) => {
       [classId]
     );
 
-    for (const reservation of activeReservations.rows as any[]) {
-      if (reservation.beneficiario_id) {
-        await client.query(
-          `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [reservation.beneficiario_id]
-        );
-      }
-      if (reservation.suscripcion_id) {
-        await client.query(
-          `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [reservation.suscripcion_id]
-        );
+    if (!isEventClass) {
+      for (const reservation of activeReservations.rows as any[]) {
+        if (reservation.beneficiario_id) {
+          await client.query(
+            `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [reservation.beneficiario_id]
+          );
+        }
+        if (reservation.suscripcion_id) {
+          await client.query(
+            `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [reservation.suscripcion_id]
+          );
+        }
       }
     }
 
@@ -1451,10 +1481,12 @@ app.delete('/api/classes/:id', async (req, res) => {
     const affectedStudentIds = Array.from(
       new Set((activeReservations.rows as any[]).map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
-    for (const studentId of affectedStudentIds) {
-      await syncStudentCredits(String(studentId));
+    if (!isEventClass) {
+      for (const studentId of affectedStudentIds) {
+        await syncStudentCredits(String(studentId));
+      }
     }
-    res.json({ success: true, refunded_students: affectedStudentIds.length });
+    res.json({ success: true, refunded_students: isEventClass ? 0 : affectedStudentIds.length });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo eliminar la clase.' });
@@ -1489,7 +1521,7 @@ app.post('/api/reservations', async (req, res) => {
 
     const classInfoResult = await client.query(
       `
-      SELECT id, date, start_time, end_time, status, min_capacity, max_capacity, capacity, COALESCE(type, '') AS type
+      SELECT id, date, start_time, end_time, status, min_capacity, max_capacity, capacity, COALESCE(type, '') AS type, COALESCE(is_event, 0) AS is_event
       FROM classes
       WHERE id = $1 AND deleted_at IS NULL
     `,
@@ -1520,40 +1552,44 @@ app.post('/api/reservations', async (req, res) => {
       return res.status(400).json({ error: 'Esta clase ya no tiene lugares disponibles.' });
     }
 
-    const beneficiaryResult = await client.query(
-      `
-      SELECT
-        sb.id,
-        sb.suscripcion_id,
-        sb.clases_restantes,
-        sa.fecha_vencimiento,
-        sa.estado AS suscripcion_estado,
-        sa.congelado
-      FROM suscripcion_beneficiarios sb
-      JOIN suscripciones_alumno sa ON sa.id = sb.suscripcion_id
-      WHERE sb.alumno_id = $1
-        AND sb.estado = 'active'
-        AND sb.clases_restantes > 0
-        AND sb.deleted_at IS NULL
-        AND sa.deleted_at IS NULL
-        AND sa.estado = 'active'
-      ORDER BY sa.fecha_vencimiento ASC
-      LIMIT 1
-    `,
-      [userId]
-    );
-    const beneficiary: any = beneficiaryResult.rows[0];
-    if (!beneficiary) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'No tienes créditos suficientes para reservar esta clase.' });
-    }
-    if (Number(beneficiary.congelado || 0) === 1) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Tu suscripción está pausada temporalmente.' });
-    }
-    if (beneficiary.fecha_vencimiento && String(beneficiary.fecha_vencimiento).slice(0, 10) < classInfo.date) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Tu paquete no cubre la fecha de esta clase.' });
+    const isEventClass = Number(classInfo.is_event || 0) === 1;
+    let beneficiary: any = null;
+    if (!isEventClass) {
+      const beneficiaryResult = await client.query(
+        `
+        SELECT
+          sb.id,
+          sb.suscripcion_id,
+          sb.clases_restantes,
+          sa.fecha_vencimiento,
+          sa.estado AS suscripcion_estado,
+          sa.congelado
+        FROM suscripcion_beneficiarios sb
+        JOIN suscripciones_alumno sa ON sa.id = sb.suscripcion_id
+        WHERE sb.alumno_id = $1
+          AND sb.estado = 'active'
+          AND sb.clases_restantes > 0
+          AND sb.deleted_at IS NULL
+          AND sa.deleted_at IS NULL
+          AND sa.estado = 'active'
+        ORDER BY sa.fecha_vencimiento ASC
+        LIMIT 1
+      `,
+        [userId]
+      );
+      beneficiary = beneficiaryResult.rows[0];
+      if (!beneficiary) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'No tienes créditos suficientes para reservar esta clase.' });
+      }
+      if (Number(beneficiary.congelado || 0) === 1) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Tu suscripción está pausada temporalmente.' });
+      }
+      if (beneficiary.fecha_vencimiento && String(beneficiary.fecha_vencimiento).slice(0, 10) < classInfo.date) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Tu paquete no cubre la fecha de esta clase.' });
+      }
     }
 
     const reservationId = createId('res_');
@@ -1562,31 +1598,35 @@ app.post('/api/reservations', async (req, res) => {
       INSERT INTO reservations (id, user_id, class_id, suscripcion_id, beneficiario_id, status, created_at, updated_at)
       VALUES ($1, $2, $3, $4, $5, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `,
-      [reservationId, userId, classId, beneficiary.suscripcion_id, beneficiary.id]
+      [reservationId, userId, classId, beneficiary?.suscripcion_id || null, beneficiary?.id || null]
     );
 
-    await client.query(
-      `
-      UPDATE suscripcion_beneficiarios
-      SET clases_restantes = clases_restantes - 1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-    `,
-      [beneficiary.id]
-    );
+    if (!isEventClass && beneficiary?.id && beneficiary?.suscripcion_id) {
+      await client.query(
+        `
+        UPDATE suscripcion_beneficiarios
+        SET clases_restantes = clases_restantes - 1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [beneficiary.id]
+      );
 
-    await client.query(
-      `
-      UPDATE suscripciones_alumno
-      SET clases_restantes = GREATEST(clases_restantes - 1, 0),
-          clases_consumidas = clases_consumidas + 1,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-    `,
-      [beneficiary.suscripcion_id]
-    );
+      await client.query(
+        `
+        UPDATE suscripciones_alumno
+        SET clases_restantes = GREATEST(clases_restantes - 1, 0),
+            clases_consumidas = clases_consumidas + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [beneficiary.suscripcion_id]
+      );
+    }
 
     await client.query('COMMIT');
-    await syncStudentCredits(userId);
+    if (!isEventClass) {
+      await syncStudentCredits(userId);
+    }
 
     const studentProfile = await getOne<any>(
       `SELECT id, full_name, email FROM profiles WHERE id = $1 AND deleted_at IS NULL`,
@@ -1624,7 +1664,8 @@ app.post('/api/reservations', async (req, res) => {
         type: classInfo.type,
         date: classInfo.date,
         start_time: classInfo.start_time,
-        end_time: classInfo.end_time
+        end_time: classInfo.end_time,
+        is_event: isEventClass ? 1 : 0
       }
     });
   } catch {
@@ -1650,7 +1691,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
 
     const reservationResult = await client.query(
       `
-      SELECT r.*, c.date, c.start_time
+      SELECT r.*, c.date, c.start_time, COALESCE(c.is_event, 0) AS class_is_event
       FROM reservations r
       JOIN classes c ON c.id = r.class_id
       WHERE r.id = $1 AND r.deleted_at IS NULL
@@ -1668,7 +1709,8 @@ app.delete('/api/reservations/:id', async (req, res) => {
     }
 
     const deadline = await calculateCancellationDeadline(reservation.date, reservation.start_time);
-    const canRefund = new Date() <= deadline;
+    const isEventClass = Number(reservation.class_is_event || 0) === 1;
+    const canRefund = !isEventClass && new Date() <= deadline;
 
     await client.query(
       `
@@ -1703,7 +1745,9 @@ app.delete('/api/reservations/:id', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    await syncStudentCredits(reservation.user_id);
+    if (!isEventClass) {
+      await syncStudentCredits(reservation.user_id);
+    }
 
     const classMeta = await getOne<any>(`SELECT type, end_time FROM classes WHERE id = $1`, [reservation.class_id]);
     const studentProfile = await getOne<any>(
@@ -1715,6 +1759,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
       studentEmail: String(studentProfile?.email || '').trim(),
       businessEmail: String(businessEmail || '').trim(),
       refunded: canRefund,
+      isEventClass,
       reservationId,
       classType: String(classMeta?.type || 'Clase'),
       classDate: String(reservation.date || ''),
@@ -1742,7 +1787,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
           'Actualización de clase',
           `
             <p style="color:#374151;line-height:1.6;margin:0 0 12px;">Tu reserva para <strong>${cancellationMailPayload.classType}</strong> (${cancellationMailPayload.classDate} ${cancellationMailPayload.classStart}-${cancellationMailPayload.classEnd}) fue cancelada.</p>
-            <p style="color:#374151;margin:0;">${cancellationMailPayload.refunded ? 'Tu crédito fue devuelto.' : 'Esta cancelación fue tardía y el crédito no es reembolsable.'}</p>
+            <p style="color:#374151;margin:0;">${cancellationMailPayload.isEventClass ? 'Era un evento gratuito, por lo que no hubo ajuste de créditos.' : (cancellationMailPayload.refunded ? 'Tu crédito fue devuelto.' : 'Esta cancelación fue tardía y el crédito no es reembolsable.')}</p>
           `
         )
       })
@@ -1761,7 +1806,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
             <p style="color:#374151;margin:0 0 8px;"><strong>Alumno:</strong> ${cancellationMailPayload.studentName}</p>
             <p style="color:#374151;margin:0 0 8px;"><strong>Clase:</strong> ${cancellationMailPayload.classType}</p>
             <p style="color:#374151;margin:0 0 8px;"><strong>Horario:</strong> ${cancellationMailPayload.classDate} ${cancellationMailPayload.classStart}-${cancellationMailPayload.classEnd}</p>
-            <p style="color:#374151;margin:0;"><strong>Reembolso:</strong> ${cancellationMailPayload.refunded ? 'Sí' : 'No (cancelación tardía)'}</p>
+            <p style="color:#374151;margin:0;"><strong>Reembolso:</strong> ${cancellationMailPayload.isEventClass ? 'No aplica (evento gratuito)' : (cancellationMailPayload.refunded ? 'Sí' : 'No (cancelación tardía)')}</p>
           `
         )
       })
@@ -1811,7 +1856,8 @@ app.get('/api/students/:id/dashboard', async (req, res) => {
         c.date,
         c.start_time,
         c.end_time,
-        COALESCE(c.type, '') AS type
+        COALESCE(c.type, '') AS type,
+        COALESCE(c.is_event, 0) AS is_event
       FROM reservations r
       JOIN classes c ON c.id = r.class_id
       CROSS JOIN now_local n
@@ -3105,7 +3151,8 @@ app.get('/api/coach/students/:id/history', async (req, res) => {
         c.type AS class_type,
         c.date AS class_date,
         c.start_time AS class_start_time,
-        c.end_time AS class_end_time
+        c.end_time AS class_end_time,
+        COALESCE(c.is_event, 0) AS class_is_event
       FROM reservations r
       LEFT JOIN classes c ON c.id = r.class_id
       WHERE r.user_id = $1
@@ -3188,6 +3235,7 @@ app.get('/api/coach/students/:id/history', async (req, res) => {
     }
 
     for (const row of reservations) {
+      const isEventClass = Number(row?.class_is_event || 0) === 1;
       const bookedAt = row?.created_at || new Date().toISOString();
       const bookedDate = formatEventDate(bookedAt);
       timeline.push({
@@ -3195,8 +3243,8 @@ app.get('/api/coach/students/:id/history', async (req, res) => {
         tipo: 'reservation',
         evento: 'Reserva de clase',
         referencia: buildClassReference(row),
-        ajuste: -1,
-        motivo: 'Credito usado en reserva',
+        ajuste: isEventClass ? 0 : -1,
+        motivo: isEventClass ? 'Evento gratuito: no consume créditos' : 'Credito usado en reserva',
         fecha: bookedDate.fecha,
         hora: bookedDate.hora,
         timestamp: new Date(bookedAt).toISOString()
@@ -3204,10 +3252,12 @@ app.get('/api/coach/students/:id/history', async (req, res) => {
 
       if (String(row?.status || '').toLowerCase() !== 'active') {
         const canceledAt = row?.updated_at || bookedAt;
-        let refundDelta = 1;
-        let refundReason = 'Credito devuelto por cancelacion del negocio.';
+        let refundDelta = isEventClass ? 0 : 1;
+        let refundReason = isEventClass
+          ? 'Evento gratuito: no consume créditos'
+          : 'Credito devuelto por cancelacion del negocio.';
 
-        if (String(row?.cancellation_reason || '') === 'cancelacion_usuario') {
+        if (!isEventClass && String(row?.cancellation_reason || '') === 'cancelacion_usuario') {
           const cancellationDeadline = await calculateCancellationDeadline(
             String(row?.class_date || ''),
             String(row?.class_start_time || '')
@@ -3661,7 +3711,7 @@ app.get('/api/admin/classes', async (_req, res) => {
   try {
     const rows = await query(
       `
-      SELECT id, type, class_type_id, date, start_time, end_time, status, min_capacity, max_capacity, capacity, created_at, updated_at, deleted_at
+      SELECT id, type, class_type_id, date, start_time, end_time, is_event, status, min_capacity, max_capacity, capacity, created_at, updated_at, deleted_at
       FROM classes
       WHERE deleted_at IS NULL
       ORDER BY date DESC, start_time DESC
@@ -3683,6 +3733,7 @@ app.put('/api/admin/classes/:id', async (req, res) => {
           start_time = COALESCE(NULLIF($4,''), start_time),
           end_time = COALESCE(NULLIF($5,''), end_time),
           status = COALESCE(NULLIF($6,''), status),
+          is_event = COALESCE($7, is_event),
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
     `,
@@ -3692,7 +3743,8 @@ app.put('/api/admin/classes/:id', async (req, res) => {
         req.body?.date || '',
         req.body?.start_time || req.body?.startTime || '',
         req.body?.end_time || req.body?.endTime || '',
-        req.body?.status || ''
+        req.body?.status || '',
+        req.body?.is_event == null ? null : Number(req.body?.is_event ?? req.body?.isEvent ?? 0) === 1 ? 1 : 0
       ]
     );
     const updated = await getOne(`SELECT * FROM classes WHERE id = $1`, [req.params.id]);
@@ -3708,6 +3760,23 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
     const classId = req.params.id;
     await client.query('BEGIN');
 
+    const classInfoResult = await client.query(
+      `
+      SELECT id, COALESCE(is_event, 0) AS is_event
+      FROM classes
+      WHERE id = $1
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [classId]
+    );
+    const classInfo: any = classInfoResult.rows[0];
+    if (!classInfo) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos la clase solicitada.' });
+    }
+    const isEventClass = Number(classInfo.is_event || 0) === 1;
+
     const activeReservations = await client.query(
       `
       SELECT id, user_id, suscripcion_id, beneficiario_id
@@ -3720,18 +3789,20 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
       [classId]
     );
 
-    for (const reservation of activeReservations.rows as any[]) {
-      if (reservation.beneficiario_id) {
-        await client.query(
-          `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [reservation.beneficiario_id]
-        );
-      }
-      if (reservation.suscripcion_id) {
-        await client.query(
-          `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [reservation.suscripcion_id]
-        );
+    if (!isEventClass) {
+      for (const reservation of activeReservations.rows as any[]) {
+        if (reservation.beneficiario_id) {
+          await client.query(
+            `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [reservation.beneficiario_id]
+          );
+        }
+        if (reservation.suscripcion_id) {
+          await client.query(
+            `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [reservation.suscripcion_id]
+          );
+        }
       }
     }
 
@@ -3756,10 +3827,12 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
     const affectedStudentIds = Array.from(
       new Set((activeReservations.rows as any[]).map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
-    for (const studentId of affectedStudentIds) {
-      await syncStudentCredits(studentId);
+    if (!isEventClass) {
+      for (const studentId of affectedStudentIds) {
+        await syncStudentCredits(studentId);
+      }
     }
-    res.json({ success: true, refunded_students: affectedStudentIds.length });
+    res.json({ success: true, refunded_students: isEventClass ? 0 : affectedStudentIds.length });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo eliminar la clase.' });
@@ -3801,9 +3874,10 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
 
     const reservationRes = await client.query(
       `
-      SELECT id, user_id, status, suscripcion_id, beneficiario_id
-      FROM reservations
-      WHERE id = $1 AND deleted_at IS NULL
+      SELECT r.id, r.user_id, r.status, r.suscripcion_id, r.beneficiario_id, COALESCE(c.is_event, 0) AS class_is_event
+      FROM reservations r
+      LEFT JOIN classes c ON c.id = r.class_id
+      WHERE r.id = $1 AND r.deleted_at IS NULL
       FOR UPDATE
     `,
       [reservationId]
@@ -3814,7 +3888,8 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
       return res.status(404).json({ error: 'No encontramos la reservación solicitada.' });
     }
 
-    const shouldRefund = String(reservation.status || '').toLowerCase() === 'active';
+    const isEventClass = Number(reservation.class_is_event || 0) === 1;
+    const shouldRefund = String(reservation.status || '').toLowerCase() === 'active' && !isEventClass;
     if (shouldRefund && reservation.beneficiario_id) {
       await client.query(
         `
@@ -3851,7 +3926,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
     );
 
     await client.query('COMMIT');
-    if (reservation.user_id) {
+    if (reservation.user_id && !isEventClass) {
       await syncStudentCredits(reservation.user_id);
     }
     res.json({ success: true, refunded: shouldRefund });
@@ -4059,9 +4134,14 @@ const ensureCoachHighlightsTable = async () => {
   );
 };
 
+const ensureClassesEventColumn = async () => {
+  await query(`ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_event INTEGER NOT NULL DEFAULT 0`);
+};
+
 const start = async () => {
   try {
     await pgPool.query('SELECT 1');
+    await ensureClassesEventColumn();
     await ensureCoachHighlightsTable();
     await ensureAdmin();
     app.listen(PORT, () => {

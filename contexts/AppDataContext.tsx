@@ -79,6 +79,7 @@ const normalizeClasses = (rows: any[]): ClassInstance[] =>
     startTime: String(d.start_time || d.startTime || '').substring(0, 5),
     endTime: String(d.end_time || d.endTime || '').substring(0, 5),
     imageUrl: d.image_url || d.imageUrl || '',
+    is_event: Number(d.is_event || d.isEvent || 0),
     status: d.status || 'active',
     min_capacity: Number(d.min_capacity || d.minCapacity || 1),
     max_capacity: Number(d.max_capacity || d.maxCapacity || d.capacity || 0),

@@ -30,6 +30,7 @@ export interface ClassInstance {
   capacity: number;
   imageUrl?: string;
   class_type_id?: string;
+  is_event?: number | boolean;
   status?: string;
   real_time_status?: string;
   min_capacity?: number;

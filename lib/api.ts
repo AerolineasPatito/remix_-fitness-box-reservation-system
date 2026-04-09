@@ -82,6 +82,18 @@ const safeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 const fetch = safeFetch;
 
+const normalizeClassPayload = (payload: any) => {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (payload.is_event != null) return payload;
+  if (payload.isEvent != null) {
+    return {
+      ...payload,
+      is_event: payload.isEvent ? 1 : 0
+    };
+  }
+  return payload;
+};
+
 export const api = {
   getClasses: async (year?: number | string) => {
     const params = new URLSearchParams();
@@ -204,26 +216,29 @@ export const api = {
     return handleResponse(res);
   },
   addClass: async (classData: any) => {
+    const payload = normalizeClassPayload(classData);
     const res = await fetch('/api/classes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(classData)
+      body: JSON.stringify(payload)
     });
     return handleResponse(res);
   },
   createClass: async (classData: any) => {
+    const payload = normalizeClassPayload(classData);
     const res = await fetch('/api/classes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(classData)
+      body: JSON.stringify(payload)
     });
     return handleResponse(res);
   },
   createRecurringClasses: async (payload: any) => {
+    const normalizedPayload = normalizeClassPayload(payload);
     const res = await fetch('/api/classes/recurring', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(normalizedPayload)
     });
     return handleResponse(res);
   },

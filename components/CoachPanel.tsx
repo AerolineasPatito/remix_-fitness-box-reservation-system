@@ -119,6 +119,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     date: new Date().toISOString().split('T')[0], // Hoy por defecto
     startTime: '07:00',
     endTime: '08:00',
+    isEvent: false,
     minCapacity: 1,
     maxCapacity: 8
   });
@@ -144,6 +145,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       imageUrl: d.image_url || d.imageUrl || '',
       status: d.status,
       real_time_status: d.real_time_status,
+      is_event: Number(d.is_event || d.isEvent || 0),
       min_capacity: Number(d.min_capacity || d.minCapacity || 1),
       max_capacity: Number(d.max_capacity || d.maxCapacity || d.capacity || 0),
       enrolled_count: Number(d.enrolled_count || 0),
@@ -699,6 +701,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           start_date: formData.date,
           start_time: formData.startTime,
           end_time: formData.endTime,
+          is_event: formData.isEvent ? 1 : 0,
           min_capacity: normalizedMinCapacity,
           max_capacity: normalizedMaxCapacity,
           created_by: user.id,
@@ -717,6 +720,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           date: formData.date,
           start_time: formData.startTime,
           end_time: formData.endTime,
+          is_event: formData.isEvent ? 1 : 0,
           min_capacity: normalizedMinCapacity,
           max_capacity: normalizedMaxCapacity,
           capacity: normalizedMaxCapacity,
@@ -731,6 +735,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         date: new Date().toISOString().split('T')[0],
         startTime: '07:00',
         endTime: '08:00',
+        isEvent: false,
         minCapacity: 1,
         maxCapacity: 8
       });
@@ -921,6 +926,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 <p><span className="font-black text-zinc-900">Horario:</span> {selectedCalendarClass.startTime} - {selectedCalendarClass.endTime}</p>
                 <p><span className="font-black text-zinc-900">Cupo:</span> {Number(availability[selectedCalendarClass.id] || selectedCalendarClass.enrolled_count || 0)}/{Number(selectedCalendarClass.max_capacity || selectedCalendarClass.capacity || 0)}</p>
                 <p><span className="font-black text-zinc-900">Mínimo requerido:</span> {Number(selectedCalendarClass.min_capacity || 1)}</p>
+                <p><span className="font-black text-zinc-900">Tipo:</span> {Number((selectedCalendarClass as any).is_event || 0) === 1 ? 'Evento gratis' : 'Clase regular'}</p>
                 <p><span className="font-black text-zinc-900">Estado:</span> {selectedCalendarClass.status || selectedCalendarClass.real_time_status || 'scheduled'}</p>
               </div>
               <div className="mt-5">
@@ -1444,6 +1450,19 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                   </div>
                 </div>
 
+                <label className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(formData.isEvent)}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, isEvent: e.target.checked }))}
+                    className="mt-1 h-4 w-4 accent-zinc-900"
+                  />
+                  <span className="space-y-1">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-zinc-800">Clase tipo evento (gratis)</span>
+                    <span className="block text-xs text-zinc-500">Permite reserva sin créditos y no aplica descuento/reembolso de créditos.</span>
+                  </span>
+                </label>
+
                 <div className="rounded-2xl border border-zinc-100 bg-zinc-50 p-4 sm:p-5 space-y-4">
                   <label className="inline-flex items-center gap-3 text-xs font-black uppercase tracking-widest text-zinc-700">
                     <input
@@ -1643,6 +1662,11 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         </div>
                         <div className="space-y-1">
                            <h4 className="text-lg sm:text-xl font-black text-zinc-900 uppercase tracking-tighter italic">{inst.type}</h4>
+                           {Number((inst as any).is_event || 0) === 1 && (
+                             <span className="inline-flex items-center px-2 py-1 rounded-lg bg-cyan-50 border border-cyan-200 text-[8px] font-black uppercase tracking-widest text-cyan-700">
+                               Evento gratis
+                             </span>
+                           )}
                            <span className="text-[8px] sm:text-[9px] font-black text-zinc-400 uppercase tracking-widest">{inst.startTime} — {inst.endTime}</span>
                         </div>
                       </div>

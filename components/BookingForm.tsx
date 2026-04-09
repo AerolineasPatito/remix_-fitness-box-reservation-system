@@ -43,6 +43,17 @@ const buildPolicyLinesV2 = (hours: number, minParticipants: number) => [
   `• Cancelación por parte del negocio: Si una clase se cancela por no alcanzar el mínimo requerido de ${minParticipants} participante${minParticipants === 1 ? '' : 's'}, recibirás una notificación por correo y tu crédito será devuelto en su totalidad.`
 ];
 
+const buildEventPolicyLines = (minParticipants: number) => [
+  'Política de Evento Gratuito',
+  '',
+  'Este evento no consume créditos y tu lugar se confirma al completar la reservación.',
+  '',
+  '• Reserva: Puedes reservar aunque tengas 0 créditos.',
+  '• Créditos: No se descuenta ningún crédito al reservar ni al asistir.',
+  `• Mínimo requerido: Si no se alcanza el mínimo de ${minParticipants} participante${minParticipants === 1 ? '' : 's'}, el negocio podrá cancelar la clase.`,
+  '• Cancelación: Si cancelas tu reserva, no aplica reembolso de créditos porque no hubo cobro.'
+];
+
 export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuccess }) => {
   const { instanceId } = useParams();
   const navigate = useNavigate();
@@ -83,9 +94,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
   }, [inst, policySettings]);
 
   const classMinParticipants = Math.max(1, Number(inst?.min_capacity || 1));
+  const isEventClass = Number(inst?.is_event || 0) === 1;
   const policyText = useMemo(
-    () => buildPolicyLinesV2(policySettings.cancellation_limit_hours, classMinParticipants),
-    [policySettings.cancellation_limit_hours, classMinParticipants]
+    () =>
+      isEventClass
+        ? buildEventPolicyLines(classMinParticipants)
+        : buildPolicyLinesV2(policySettings.cancellation_limit_hours, classMinParticipants),
+    [isEventClass, policySettings.cancellation_limit_hours, classMinParticipants]
   );
 
   if (!inst) return <div className="text-center py-20 uppercase font-black tracking-widest text-zinc-300">Sesión expirada o no encontrada.</div>;
@@ -285,14 +300,20 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-8">
-            <div className="bg-amber-50 border border-amber-100 p-4 sm:p-6 rounded-2xl sm:rounded-3xl space-y-2 sm:space-y-3">
+            <div className={`${isEventClass ? 'bg-cyan-50 border-cyan-100' : 'bg-amber-50 border-amber-100'} border p-4 sm:p-6 rounded-2xl sm:rounded-3xl space-y-2 sm:space-y-3`}>
               <div className="flex items-center space-x-3">
-                <i className="fas fa-info-circle text-amber-500 text-sm sm:text-base"></i>
-                <p className="text-[8px] sm:text-[10px] font-black text-amber-800 uppercase tracking-widest">Importante</p>
+                <i className={`fas fa-info-circle text-sm sm:text-base ${isEventClass ? 'text-cyan-600' : 'text-amber-500'}`}></i>
+                <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${isEventClass ? 'text-cyan-800' : 'text-amber-800'}`}>Importante</p>
               </div>
-              <p className="text-[8px] sm:text-[10px] text-amber-700 leading-relaxed">
-                Al confirmar, se descontará 1 crédito de tu cuenta. Esta acción es irreversible.
-              </p>
+              {isEventClass ? (
+                <p className="text-[8px] sm:text-[10px] text-cyan-700 leading-relaxed">
+                  Evento gratuito, no consume créditos.
+                </p>
+              ) : (
+                <p className="text-[8px] sm:text-[10px] text-amber-700 leading-relaxed">
+                  Al confirmar, se descontará 1 crédito de tu cuenta. Esta acción es irreversible.
+                </p>
+              )}
             </div>
 
             <button
@@ -310,7 +331,13 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
 
             {policyAccepted ? (
               <p className="text-center text-xs text-zinc-500">
-                Puedes cancelar hasta el <span className="font-black text-zinc-900">{cancellationDeadlineLabel}</span>.{' '}
+                {isEventClass ? (
+                  <>Este evento no consume créditos. </>
+                ) : (
+                  <>
+                    Puedes cancelar hasta el <span className="font-black text-zinc-900">{cancellationDeadlineLabel}</span>.{' '}
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => {

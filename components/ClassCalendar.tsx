@@ -214,6 +214,7 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
                     const occupied = Number(availability[classItem.id] || classItem.enrolled_count || 0);
                     const max = Number(classItem.max_capacity || classItem.capacity || 0);
                     const min = Number(classItem.min_capacity || 1);
+                    const isEventClass = Number((classItem as any).is_event || 0) === 1;
                     const isEnrolled = Boolean(enrolledClassIds?.has(classItem.id));
                     const { status, blocked } = computeClassStatus(classItem, occupied);
                     const rowClickable = mode === 'coach' || isEnrolled || (!blocked && status === 'Disponible');
@@ -238,6 +239,11 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
                         </div>
                         <p className="text-[10px] font-semibold text-zinc-600 mt-1">{timeRange(classItem)}</p>
                         <p className="text-[10px] text-zinc-500 mt-1">Cupo: {occupied}/{max}</p>
+                        {isEventClass && (
+                          <p className="inline-flex mt-1 px-2 py-1 rounded-md bg-cyan-50 border border-cyan-200 text-[9px] font-black uppercase tracking-widest text-cyan-700">
+                            Evento gratis
+                          </p>
+                        )}
                         {mode === 'coach' ? (
                           <>
                             <p className="text-[10px] text-zinc-500">Mín. {min}</p>

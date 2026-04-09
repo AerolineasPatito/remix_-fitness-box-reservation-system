@@ -58,7 +58,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
     cancellation_deadline_evening: '22:00'
   });
   const [cancelingReservationId, setCancelingReservationId] = useState<string | null>(null);
-  const [cancelPreview, setCancelPreview] = useState<{ reservationId: string; isLate: boolean; limitHours: number; deadlineLabel: string } | null>(null);
+  const [cancelPreview, setCancelPreview] = useState<{ reservationId: string; isLate: boolean; isEventClass: boolean; limitHours: number; deadlineLabel: string } | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<any | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +146,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   };
 
   const previewCancellation = (reservation: any) => {
+    const isEventClass = Number(reservation?.is_event || 0) === 1;
     const deadline = calculateCancellationDeadline(
       reservation.date,
       String(reservation.start_time).slice(0, 5),
@@ -157,6 +158,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
     setCancelPreview({
       reservationId: reservation.id,
       isLate,
+      isEventClass,
       limitHours: publicSettings.cancellation_limit_hours,
       deadlineLabel: formatCancellationDeadline(deadline, DEFAULT_APP_TIMEZONE)
     });
@@ -194,12 +196,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
               <i className={`fas ${cancelPreview.isLate ? 'fa-triangle-exclamation' : 'fa-circle-check'} text-xl`}></i>
             </div>
             <h4 className="text-3xl font-bebas tracking-tight uppercase italic text-zinc-900">
-              {cancelPreview.isLate ? 'Cancelación tardía' : 'Cancelación sin penalización'}
+              {cancelPreview.isEventClass ? 'Cancelar evento gratuito' : (cancelPreview.isLate ? 'Cancelación tardía' : 'Cancelación sin penalización')}
             </h4>
             <p className="mt-3 text-sm text-zinc-600">
-              {cancelPreview.isLate
-                ? `Estás cancelando después del límite (${cancelPreview.deadlineLabel}). Se libera tu lugar, pero pierdes el crédito.`
-                : `Estás dentro del límite. Puedes cancelar hasta ${cancelPreview.deadlineLabel} y tu crédito será devuelto.`}
+              {cancelPreview.isEventClass
+                ? 'Esta reserva no consume créditos, así que no aplica reembolso.'
+                : cancelPreview.isLate
+                  ? `Estás cancelando después del límite (${cancelPreview.deadlineLabel}). Se libera tu lugar, pero pierdes el crédito.`
+                  : `Estás dentro del límite. Puedes cancelar hasta ${cancelPreview.deadlineLabel} y tu crédito será devuelto.`}
             </p>
             <div className="mt-8 flex gap-3">
               <button
@@ -356,6 +360,9 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                       )}
                       <div>
                         <p className="text-sm font-black uppercase tracking-tight text-zinc-900">{r.type}</p>
+                        {Number(r?.is_event || 0) === 1 && (
+                          <p className="mt-1 inline-flex px-2 py-1 rounded-md bg-cyan-50 border border-cyan-200 text-[9px] font-black uppercase tracking-widest text-cyan-700">Evento gratis</p>
+                        )}
                         <p className="text-[11px] text-zinc-500 font-semibold">
                           {new Date(`${r.date}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })} | {String(r.start_time).slice(0, 5)} - {String(r.end_time).slice(0, 5)}
                         </p>

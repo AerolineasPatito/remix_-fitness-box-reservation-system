@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS classes (
   date TEXT,
   start_time TEXT,
   end_time TEXT,
+  is_event INTEGER NOT NULL DEFAULT 0,
   capacity INTEGER DEFAULT 8,
   min_capacity INTEGER DEFAULT 1,
   max_capacity INTEGER DEFAULT 8,
@@ -311,4 +312,3 @@ try {
   sqlite.close();
   await pg.end().catch(() => {});
 }
-

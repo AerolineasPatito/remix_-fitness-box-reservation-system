@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Link, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { Header } from './components/Header.tsx';
 import { ServiceSelector } from './components/ServiceSelector.tsx';
 import { Schedule } from './components/Schedule.tsx';
@@ -43,7 +43,54 @@ const AppShell: React.FC<AppShellProps> = ({
   fetchProfile,
   handleLogout
 }) => {
-  const { classes, availability, refreshAvailability, refreshClasses } = useAppData();
+  const { classes, availability, classesLoading, refreshAvailability, refreshClasses } = useAppData();
+  const BookRoute: React.FC = () => {
+    const { instanceId = '' } = useParams();
+    const bookingInstanceId = decodeURIComponent(instanceId || '');
+    const bookingInstance = (classes || []).find((row: any) => String(row?.id || '') === bookingInstanceId);
+    const isEventClass = Number((bookingInstance as any)?.is_event || 0) === 1;
+    const shouldBlockForCredits =
+      userProfile.role === 'student' &&
+      userProfile.credits_remaining <= 0 &&
+      !classesLoading &&
+      Boolean(bookingInstance) &&
+      !isEventClass;
+
+    return (
+      <div className="container mx-auto px-4 py-12">
+        {shouldBlockForCredits ? (
+          <div className="max-w-xl mx-auto py-20 text-center space-y-6 animate-in fade-in zoom-in">
+            <div className="w-24 h-24 bg-rose-50 text-rose-500 rounded-[2.5rem] flex items-center justify-center mx-auto border border-rose-100 rotate-12">
+              <i className="fas fa-bolt text-3xl"></i>
+            </div>
+            <h3 className="text-5xl font-bebas text-zinc-900 uppercase italic tracking-tight">Sin CrÃ©ditos</h3>
+            <p className="text-zinc-400 text-xs font-bold uppercase tracking-[0.3em] max-w-xs mx-auto">
+              Tu contador de clases estÃ¡ en cero. Contacta a tu coach para renovar.
+            </p>
+            <Link
+              to="/"
+              className="inline-block px-12 py-5 bg-zinc-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.4em] hover:bg-brand transition-all shadow-xl"
+            >
+              Volver a Clases
+            </Link>
+          </div>
+        ) : (
+          <BookingForm
+            user={userProfile}
+            instances={classes}
+            onSuccess={async (booking) => {
+              setLastBooking(booking);
+              await refreshAvailability();
+              await refreshClasses();
+              if (session) {
+                await refreshStudentState(session.user.id);
+              }
+            }}
+          />
+        )}
+      </div>
+    );
+  };
 
   return (
     <Router>
@@ -141,7 +188,25 @@ const AppShell: React.FC<AppShellProps> = ({
               path="/book/:instanceId"
               element={
                 <div className="container mx-auto px-4 py-12">
-                  {userProfile.role === 'student' && userProfile.credits_remaining <= 0 ? (
+                  {(() => {
+                    const bookingInstanceId =
+                      typeof window !== 'undefined'
+                        ? decodeURIComponent(
+                            ((window.location.pathname.split('/book/')[1] || '').split('/')[0] || '')
+                              .split('?')[0]
+                              .split('#')[0]
+                          )
+                        : '';
+                    const bookingInstance = (classes || []).find((row: any) => String(row?.id || '') === bookingInstanceId);
+                    const isEventClass = Number((bookingInstance as any)?.is_event || 0) === 1;
+                    const shouldBlockForCredits =
+                      userProfile.role === 'student' &&
+                      userProfile.credits_remaining <= 0 &&
+                      !classesLoading &&
+                      Boolean(bookingInstance) &&
+                      !isEventClass;
+                    return shouldBlockForCredits;
+                  })() ? (
                     <div className="max-w-xl mx-auto py-20 text-center space-y-6 animate-in fade-in zoom-in">
                       <div className="w-24 h-24 bg-rose-50 text-rose-500 rounded-[2.5rem] flex items-center justify-center mx-auto border border-rose-100 rotate-12">
                         <i className="fas fa-bolt text-3xl"></i>

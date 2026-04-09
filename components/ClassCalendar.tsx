@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ClassInstance } from '../types.ts';
+import { Badge, Button, Card, LoadingState } from './ui/index.ts';
 
 type CalendarView = 'day' | 'week' | 'month';
 type CalendarMode = 'student' | 'coach';
@@ -153,18 +154,18 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
   const isMonthView = view === 'month';
 
   return (
-    <div className="bg-white border border-zinc-100 rounded-3xl p-4 sm:p-6 space-y-4">
+    <Card variant="surface" padding="lg" className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => move('prev')} className="w-9 h-9 rounded-xl border border-zinc-200 text-zinc-500 hover:bg-zinc-50">
+          <Button type="button" variant="secondary" size="sm" onClick={() => move('prev')} className="!w-9 !px-0">
             <i className="fas fa-chevron-left text-xs"></i>
-          </button>
-          <button type="button" onClick={() => setAnchorDate(new Date())} className="px-3 py-2 rounded-xl border border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-700 hover:bg-zinc-50">
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setAnchorDate(new Date())} className="text-[10px]">
             Hoy
-          </button>
-          <button type="button" onClick={() => move('next')} className="w-9 h-9 rounded-xl border border-zinc-200 text-zinc-500 hover:bg-zinc-50">
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => move('next')} className="!w-9 !px-0">
             <i className="fas fa-chevron-right text-xs"></i>
-          </button>
+          </Button>
         </div>
         <h4 className="text-lg sm:text-xl font-bebas tracking-wide uppercase italic text-zinc-900">{title}</h4>
         <div className="grid grid-cols-3 rounded-xl bg-zinc-100 p-1 text-[10px] font-black uppercase tracking-widest">
@@ -182,10 +183,7 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
       </div>
 
       {loading ? (
-        <div className="py-10 text-center text-zinc-400">
-          <i className="fas fa-circle-notch fa-spin text-2xl"></i>
-          <p className="mt-3 text-[10px] font-black uppercase tracking-widest">Cargando calendario</p>
-        </div>
+        <LoadingState title="Cargando calendario" size="md" />
       ) : (
         <div className={`${isMonthView ? 'grid grid-cols-7 gap-2' : view === 'week' ? 'grid grid-cols-1 md:grid-cols-7 gap-3' : 'grid grid-cols-1 gap-3'}`}>
           {visibleDates.map((date) => {
@@ -235,7 +233,22 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
                       >
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-[11px] font-black uppercase tracking-tight text-zinc-900 line-clamp-1">{classItem.type}</p>
-                          <span className="text-[9px] font-black uppercase tracking-widest">{status}</span>
+                          <Badge
+                            size="sm"
+                            variant={
+                              status === 'Disponible'
+                                ? 'success'
+                                : status === 'Llena'
+                                  ? 'warning'
+                                  : status === 'Cancelada'
+                                    ? 'danger'
+                                    : status === 'En curso'
+                                      ? 'info'
+                                      : 'neutral'
+                            }
+                          >
+                            {status}
+                          </Badge>
                         </div>
                         <p className="text-[10px] font-semibold text-zinc-600 mt-1">{timeRange(classItem)}</p>
                         <p className="text-[10px] text-zinc-500 mt-1">Cupo: {occupied}/{max}</p>
@@ -273,7 +286,7 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
                     <p className="text-[10px] text-zinc-500 font-semibold">+{dayClasses.length - 3} clases más</p>
                   )}
                   {dayClasses.length === 0 && !isMonthView && (
-                    <p className="text-[10px] text-zinc-400 uppercase tracking-widest">Sin clases</p>
+                    <p className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--color-neutral-400)' }}>Sin clases</p>
                   )}
                 </div>
               </div>
@@ -281,6 +294,6 @@ export const ClassCalendar: React.FC<ClassCalendarProps> = ({
           })}
         </div>
       )}
-    </div>
+    </Card>
   );
 };

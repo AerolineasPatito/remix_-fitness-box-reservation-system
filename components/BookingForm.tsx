@@ -10,6 +10,7 @@ import {
 } from '../lib/cancellationPolicy.ts';
 import { useAppData } from '../contexts/AppDataContext.tsx';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Badge, Button, Card } from './ui/index.ts';
 
 interface BookingFormProps {
   user: Profile;
@@ -103,7 +104,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
     [isEventClass, policySettings.cancellation_limit_hours, classMinParticipants]
   );
 
-  if (!inst) return <div className="text-center py-20 uppercase font-black tracking-widest text-zinc-300">Sesión expirada o no encontrada.</div>;
+  if (!inst) return <Card className="text-center py-20 uppercase font-black tracking-widest text-zinc-300">Sesión expirada o no encontrada.</Card>;
 
   const runReservation = async () => {
     const resData = await api.createReservation(user.id, inst.id);
@@ -203,33 +204,39 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
             <div className="mt-6 flex gap-3">
               {isMandatoryPolicyFlow ? (
                 <>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => {
                       setShowPolicyModal(false);
                       setIsMandatoryPolicyFlow(false);
                     }}
-                    className="flex-1 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                    variant="secondary"
+                    fullWidth
+                    className="text-[10px]"
                   >
                     Cerrar
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     disabled={loading}
                     onClick={handleAcceptPolicyAndContinue}
-                    className="flex-1 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-60"
+                    variant="primary"
+                    fullWidth
+                    className="text-[10px] disabled:opacity-60"
                   >
                     {loading ? 'Procesando...' : 'Acepto'}
-                  </button>
+                  </Button>
                 </>
               ) : (
-                <button
+                <Button
                   type="button"
                   onClick={() => setShowPolicyModal(false)}
-                  className="w-full py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
+                  variant="primary"
+                  fullWidth
+                  className="text-[10px]"
                 >
                   Entendido
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -238,12 +245,15 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
 
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-8 sm:gap-16 lg:gap-20 items-start">
         <div className="lg:col-span-2 space-y-8 sm:space-y-10">
-          <button
+          <Button
+            type="button"
             onClick={() => navigate(-1)}
-            className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-brand transition-all border border-zinc-100 group"
+            variant="secondary"
+            size="sm"
+            className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl px-0 text-zinc-400 group"
           >
             <i className="fas fa-arrow-left group-hover:-translate-x-1 transition-transform text-sm sm:text-base"></i>
-          </button>
+          </Button>
 
           <div className="space-y-3 sm:space-y-4">
             <h2 className="text-4xl sm:text-6xl lg:text-7xl font-bebas text-zinc-900 leading-[0.8] tracking-tighter uppercase italic">
@@ -279,9 +289,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
           </div>
 
           {error && (
-            <div className="bg-rose-50 border border-rose-100 text-rose-500 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-[10px] sm:text-xs font-bold uppercase tracking-widest text-center animate-in fade-in">
+            <Card className="bg-rose-50 border border-rose-100 text-rose-500 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-[10px] sm:text-xs font-bold uppercase tracking-widest text-center animate-in fade-in">
               {error}
-            </div>
+            </Card>
           )}
 
           <div className="space-y-4 sm:space-y-6">
@@ -303,7 +313,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
             <div className={`${isEventClass ? 'bg-cyan-50 border-cyan-100' : 'bg-amber-50 border-amber-100'} border p-4 sm:p-6 rounded-2xl sm:rounded-3xl space-y-2 sm:space-y-3`}>
               <div className="flex items-center space-x-3">
                 <i className={`fas fa-info-circle text-sm sm:text-base ${isEventClass ? 'text-cyan-600' : 'text-amber-500'}`}></i>
-                <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest ${isEventClass ? 'text-cyan-800' : 'text-amber-800'}`}>Importante</p>
+                <Badge variant={isEventClass ? 'info' : 'warning'} className="text-[8px] sm:text-[10px]">Importante</Badge>
               </div>
               {isEventClass ? (
                 <p className="text-[8px] sm:text-[10px] text-cyan-700 leading-relaxed">
@@ -316,10 +326,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
               )}
             </div>
 
-            <button
+            <Button
               type="submit"
+              variant="primary"
               disabled={loading}
-              className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[1.8rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-2xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4 disabled:opacity-60"
+              fullWidth
+              className="py-6 sm:py-8 text-white font-black rounded-[1.8rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] transition-all shadow-2xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4 disabled:opacity-60"
             >
               {loading ? <i className="fas fa-circle-notch fa-spin text-sm sm:text-base"></i> : (
                 <>
@@ -327,7 +339,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
                   <i className="fas fa-check text-xs sm:text-sm"></i>
                 </>
               )}
-            </button>
+            </Button>
 
             {policyAccepted ? (
               <p className="text-center text-xs text-zinc-500">

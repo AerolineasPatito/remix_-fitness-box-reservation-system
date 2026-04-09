@@ -7,6 +7,7 @@ import { CancellationPolicySettings } from '../lib/cancellationPolicy.ts';
 import { ReservationCancellationModal } from './ReservationCancellationModal.tsx';
 import { useNotifications } from './NotificationSystem.tsx';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Badge, Button, Card, LoadingState } from './ui/index.ts';
 
 type CalendarViewMode = 'day' | 'week' | 'month';
 
@@ -113,11 +114,11 @@ const getStatusLabel = (classRow: CalendarClass) => {
   return 'Disponible';
 };
 
-const getStatusPillClass = (classRow: CalendarClass) => {
-  if (classRow.class_status === 'cancelled') return 'bg-rose-100 text-rose-700';
-  if (classRow.class_status === 'finished') return 'bg-zinc-100 text-zinc-500';
-  if (classRow.class_status === 'full') return 'bg-amber-100 text-amber-700';
-  return 'bg-emerald-100 text-emerald-700';
+const getStatusPillVariant = (classRow: CalendarClass) => {
+  if (classRow.class_status === 'cancelled') return 'danger' as const;
+  if (classRow.class_status === 'finished') return 'neutral' as const;
+  if (classRow.class_status === 'full') return 'warning' as const;
+  return 'success' as const;
 };
 
 export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData }) => {
@@ -291,9 +292,9 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
       >
         <div className="flex items-start justify-between gap-2">
           <p className="text-xs font-black uppercase tracking-wide text-zinc-900">{classRow.type}</p>
-          <span className={`text-[10px] font-black px-2 py-1 rounded-full ${getStatusPillClass(classRow)}`}>
+          <Badge variant={getStatusPillVariant(classRow)} className="text-[10px] font-black">
             {getStatusLabel(classRow)}
-          </span>
+          </Badge>
         </div>
         <p className="mt-2 text-[11px] font-semibold text-zinc-600">
           {String(classRow.start_time).slice(0, 5)} - {String(classRow.end_time).slice(0, 5)}
@@ -325,7 +326,7 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
   };
 
   return (
-    <div className="mt-10 sm:mt-12 rounded-3xl border border-zinc-100 bg-white p-4 sm:p-6 shadow-xl overflow-x-hidden [&_button]:min-h-[44px]">
+    <Card className="mt-10 sm:mt-12 rounded-3xl border border-zinc-100 bg-white p-4 sm:p-6 shadow-xl overflow-x-hidden [&_button]:min-h-[44px]">
       <ReservationCancellationModal
         isOpen={Boolean(cancelTarget)}
         reservation={cancelTarget}
@@ -358,15 +359,17 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
               </div>
             )}
             <div className="mt-6 flex gap-3">
-              <button
+              <Button
                 type="button"
                 onClick={() => setSelectedClass(null)}
-                className="flex-1 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                variant="secondary"
+                fullWidth
+                className="text-[10px]"
               >
                 Cerrar
-              </button>
+              </Button>
               {isStudentView && selectedClass.viewer_reservation && (
-                <button
+                <Button
                   type="button"
                   onClick={() => {
                     setSelectedClass(null);
@@ -380,10 +383,12 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
                     });
                   }}
                   disabled={cancelingReservationId === selectedClass.viewer_reservation.reservation_id}
-                  className="flex-1 py-3 rounded-xl bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-60"
+                  variant="danger"
+                  fullWidth
+                  className="text-[10px] disabled:opacity-60"
                 >
                   {cancelingReservationId === selectedClass.viewer_reservation.reservation_id ? 'Cancelando...' : 'Cancelar reserva'}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -397,39 +402,36 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
         </div>
         <div className="flex items-center gap-2">
           {(['day', 'week', 'month'] as CalendarViewMode[]).map((mode) => (
-            <button
+            <Button
               key={mode}
               type="button"
               onClick={() => setViewMode(mode)}
-              className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                viewMode === mode ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-600'
-              }`}
+              size="sm"
+              variant={viewMode === mode ? 'primary' : 'ghost'}
+              className={viewMode === mode ? '' : 'border-transparent text-zinc-600'}
             >
               {mode === 'day' ? 'Día' : mode === 'week' ? 'Semana' : 'Mes'}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        <button type="button" onClick={goPrev} className="w-10 h-10 rounded-xl bg-zinc-100 text-zinc-600 hover:bg-zinc-200">
+        <Button type="button" onClick={goPrev} variant="secondary" size="sm" className="w-10 h-10 rounded-xl px-0">
           <i className="fas fa-chevron-left"></i>
-        </button>
+        </Button>
         <p className="text-sm font-black uppercase tracking-widest text-zinc-600">
           {range.start.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
           {' - '}
           {range.end.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
         </p>
-        <button type="button" onClick={goNext} className="w-10 h-10 rounded-xl bg-zinc-100 text-zinc-600 hover:bg-zinc-200">
+        <Button type="button" onClick={goNext} variant="secondary" size="sm" className="w-10 h-10 rounded-xl px-0">
           <i className="fas fa-chevron-right"></i>
-        </button>
+        </Button>
       </div>
 
       {loading ? (
-        <div className="py-16 text-center">
-          <i className="fas fa-circle-notch text-2xl text-brand animate-spin"></i>
-          <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-zinc-400">Cargando calendario</p>
-        </div>
+        <LoadingState title="Cargando calendario" icon="fa-calendar-day" />
       ) : (
         <div className={`mt-5 ${viewMode === 'month' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3' : 'grid grid-cols-1 lg:grid-cols-2 gap-3'}`}>
           {visibleDays.map((day) => {
@@ -453,6 +455,6 @@ export const HomeCalendar: React.FC<HomeCalendarProps> = ({ user, onRefreshData 
           })}
         </div>
       )}
-    </div>
+    </Card>
   );
 };

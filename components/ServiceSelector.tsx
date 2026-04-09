@@ -5,6 +5,7 @@ import { slugifyClassType } from '../lib/routeHelpers.ts';
 import { Profile } from '../types.ts';
 import { HomeCalendar } from './HomeCalendar.tsx';
 import { useAppData } from '../contexts/AppDataContext.tsx';
+import { Button, Card, EmptyState, LoadingState } from './ui/index.ts';
 
 const fallbackImages = [
   'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&q=80&w=800',
@@ -75,16 +76,15 @@ export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefres
     <div className="py-12 sm:py-16 md:py-24 bg-white animate-in fade-in duration-1000">
       <div className="container mx-auto px-4">
         {highlightsLoading ? (
-          <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 mb-8 text-center">
-            <i className="fas fa-circle-notch text-2xl text-brand animate-spin"></i>
-            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.3em] mt-3">Cargando destacados</p>
-          </div>
+          <Card className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 mb-8 text-center">
+            <LoadingState title="Cargando destacados" icon="fa-star" />
+          </Card>
         ) : activeHighlights.length > 0 ? (
           <section className="mb-8 max-w-6xl mx-auto">
             <div className="mb-3 px-1">
               <p className="text-[10px] font-black uppercase tracking-[0.35em] text-cyan-600">Evento / promocion</p>
             </div>
-            <div className="rounded-3xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+            <Card className="rounded-3xl border border-zinc-200 bg-white shadow-sm overflow-hidden p-0">
             <div
               className="relative overflow-hidden select-none"
             onMouseEnter={() => setPaused(true)}
@@ -132,22 +132,26 @@ export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefres
             </div>
 
             <div className="absolute top-1/2 -translate-y-1/2 left-2 sm:left-3 md:left-4 right-2 sm:right-3 md:right-4 flex items-center justify-between z-20 pointer-events-none">
-              <button
+              <Button
                 type="button"
                 onClick={() => goToHighlight(highlightIndex - 1)}
-                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all"
+                variant="ghost"
+                size="sm"
+                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all px-0"
                 aria-label="Anterior"
               >
                 <i className="fas fa-chevron-left text-sm"></i>
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => goToHighlight(highlightIndex + 1)}
-                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all"
+                variant="ghost"
+                size="sm"
+                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all px-0"
                 aria-label="Siguiente"
               >
                 <i className="fas fa-chevron-right text-sm"></i>
-              </button>
+              </Button>
             </div>
 
             </div>
@@ -181,7 +185,7 @@ export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefres
                 </div>
               </div>
             </div>
-            </div>
+            </Card>
           </section>
         ) : null}
 
@@ -209,14 +213,9 @@ export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefres
         </div>
 
         {classTypesLoading ? (
-          <div className="py-20 text-center">
-            <i className="fas fa-circle-notch text-3xl text-brand animate-spin"></i>
-            <p className="text-zinc-400 text-xs font-black uppercase tracking-[0.3em] mt-4">Cargando categorias</p>
-          </div>
+          <LoadingState title="Cargando categorias" icon="fa-dumbbell" />
         ) : categories.length === 0 ? (
-          <div className="py-20 text-center border border-dashed border-zinc-200 rounded-3xl">
-            <p className="text-zinc-500 font-bold">No hay tipos de entrenamiento activos.</p>
-          </div>
+          <EmptyState title="No hay tipos de entrenamiento activos." icon="fa-layer-group" />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 md:gap-8">
             {categories.map((service, index) => {

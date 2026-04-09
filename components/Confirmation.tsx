@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import html2canvas from 'html2canvas';
+import { Button, Card } from './ui/index.ts';
 
 interface ConfirmationProps {
   booking: any;
@@ -13,9 +14,9 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
 
   if (!booking) {
     return (
-      <div className="text-center py-20 text-zinc-400 uppercase font-black tracking-widest">
+      <Card className="text-center py-20 text-zinc-400 uppercase font-black tracking-widest">
         No se encontro informacion.
-      </div>
+      </Card>
     );
   }
 
@@ -243,31 +244,31 @@ export const Confirmation: React.FC<ConfirmationProps> = ({ booking }) => {
             href={googleCalendarLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center space-x-4 py-6 bg-white border-2 border-zinc-100 hover:border-brand text-zinc-900 font-bold rounded-2xl transition-all"
+            className="inline-flex items-center justify-center gap-4 w-full min-h-[44px] py-6 bg-white border-2 border-zinc-100 hover:border-brand text-zinc-900 font-bold rounded-2xl transition-all"
           >
             <i className="fab fa-google text-brand text-xl"></i>
             <span className="text-[10px] font-black uppercase tracking-[0.2em]">Google Calendar</span>
           </a>
         ) : (
-          <button
+          <Button
             type="button"
             disabled
-            className="flex items-center justify-center space-x-4 py-6 bg-zinc-100 border-2 border-zinc-200 text-zinc-500 font-bold rounded-2xl cursor-not-allowed"
+            variant="secondary"
+            className="w-full py-6 border-2 border-zinc-200 text-zinc-500 font-bold rounded-2xl cursor-not-allowed"
+            leftIcon={<i className="fab fa-google text-zinc-400 text-xl"></i>}
           >
-            <i className="fab fa-google text-zinc-400 text-xl"></i>
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Google Calendar</span>
-          </button>
+            Google Calendar
+          </Button>
         )}
-        <button
+        <Button
           onClick={handleDownloadTicket}
           disabled={downloadingTicket}
-          className="flex items-center justify-center space-x-4 py-6 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-2xl transition-all shadow-xl shadow-zinc-400/10 disabled:opacity-60"
+          variant="primary"
+          className="w-full py-6 text-white font-bold rounded-2xl transition-all shadow-xl shadow-zinc-400/10 disabled:opacity-60"
+          leftIcon={<i className="fas fa-ticket-alt text-brand text-xl"></i>}
         >
-          <i className="fas fa-ticket-alt text-brand text-xl"></i>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-            {downloadingTicket ? 'Generando ticket...' : 'Descargar Ticket'}
-          </span>
-        </button>
+          {downloadingTicket ? 'Generando ticket...' : 'Descargar Ticket'}
+        </Button>
       </div>
 
       {downloadError && (

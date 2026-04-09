@@ -11,6 +11,7 @@ import {
   DEFAULT_APP_TIMEZONE
 } from '../lib/cancellationPolicy.ts';
 import { useAppData } from '../contexts/AppDataContext.tsx';
+import { Button, Card, EmptyState } from './ui/index.ts';
 
 interface ScheduleProps {
   instances: ClassInstance[];
@@ -183,7 +184,7 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 overflow-x-hidden [&_button]:min-h-[44px] [&_a]:min-h-[44px]">
+    <Card className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 overflow-x-hidden [&_button]:min-h-[44px] [&_a]:min-h-[44px]">
       {cancelPreview && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
           <button
@@ -206,21 +207,25 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                   : `Estás dentro del límite. Puedes cancelar hasta ${cancelPreview.deadlineLabel} y tu crédito será devuelto.`}
             </p>
             <div className="mt-8 flex gap-3">
-              <button
+              <Button
                 type="button"
                 onClick={() => setCancelPreview(null)}
-                className="flex-1 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                variant="secondary"
+                fullWidth
+                className="text-[10px]"
               >
                 Volver
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={cancelingReservationId === cancelPreview.reservationId}
                 onClick={confirmCancellation}
-                className="flex-1 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-60"
+                variant="primary"
+                fullWidth
+                className="text-[10px] disabled:opacity-60"
               >
                 {cancelingReservationId === cancelPreview.reservationId ? 'Cancelando...' : 'Confirmar'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -241,24 +246,28 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
               <p><span className="font-black text-zinc-900">Horario:</span> {String(selectedReservation.start_time).slice(0, 5)} - {String(selectedReservation.end_time).slice(0, 5)}</p>
             </div>
             <div className="mt-6 flex gap-3">
-              <button
+              <Button
                 type="button"
                 onClick={() => setSelectedReservation(null)}
-                className="flex-1 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                variant="secondary"
+                fullWidth
+                className="text-[10px]"
               >
                 Cerrar
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => {
                   const target = selectedReservation;
                   setSelectedReservation(null);
                   previewCancellation(target);
                 }}
-                className="flex-1 py-3 rounded-xl bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all"
+                variant="danger"
+                fullWidth
+                className="text-[10px]"
               >
                 Cancelar Reserva
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -266,12 +275,14 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-zinc-100 pb-10">
         <div className="flex items-center space-x-8">
-          <button
+          <Button
+            type="button"
             onClick={() => navigate('/')}
-            className="w-14 h-14 rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400 hover:text-brand hover:bg-white border border-transparent hover:border-zinc-100 transition-all shadow-sm group"
+            variant="secondary"
+            className="w-14 h-14 rounded-2xl px-0 text-zinc-400 hover:text-brand border-transparent group"
           >
             <i className="fas fa-chevron-left group-hover:-translate-x-1 transition-transform"></i>
-          </button>
+          </Button>
           <div>
             <nav className="flex items-center space-x-2 mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">
               <Link to="/" className="hover:text-brand transition-colors">Clases</Link>
@@ -282,13 +293,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
           </div>
         </div>
 
-        <button
+        <Button
+          type="button"
           onClick={goToToday}
-          className="flex items-center space-x-3 bg-zinc-900 px-6 py-3 rounded-2xl group hover:bg-brand transition-all shadow-xl shadow-zinc-200"
+          variant="primary"
+          className="flex items-center space-x-3 px-6 py-3 rounded-2xl group shadow-xl shadow-zinc-200"
         >
           <div className="w-2 h-2 bg-brand group-hover:bg-white rounded-full animate-pulse"></div>
           <span className="text-[10px] font-black text-white uppercase tracking-widest">Regresar a Hoy</span>
-        </button>
+        </Button>
       </div>
 
       {isStudent && (
@@ -368,13 +381,15 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
                         </p>
                       </div>
                     </div>
-                    <button
+                    <Button
                       type="button"
                       onClick={() => previewCancellation(r)}
-                      className="px-5 py-3 rounded-xl bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
+                      variant="danger"
+                      size="sm"
+                      className="px-5 text-[10px]"
                     >
                       Cancelar Reserva
-                    </button>
+                    </Button>
                   </div>
                 );
               })}
@@ -393,12 +408,12 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
             {activeDate.fullMonth} <span className="text-zinc-300 ml-2">{activeDate.year}</span>
           </span>
           <div className="flex space-x-2">
-            <button onClick={() => scroll('left')} className="w-8 h-8 rounded-full border border-zinc-100 flex items-center justify-center text-zinc-400 hover:bg-zinc-50 transition-all">
+            <Button type="button" onClick={() => scroll('left')} variant="ghost" size="sm" className="w-8 h-8 rounded-full border border-zinc-100 text-zinc-400 hover:bg-zinc-50 transition-all px-0">
               <i className="fas fa-chevron-left text-[10px]"></i>
-            </button>
-            <button onClick={() => scroll('right')} className="w-8 h-8 rounded-full border border-zinc-100 flex items-center justify-center text-zinc-400 hover:bg-zinc-50 transition-all">
+            </Button>
+            <Button type="button" onClick={() => scroll('right')} variant="ghost" size="sm" className="w-8 h-8 rounded-full border border-zinc-100 text-zinc-400 hover:bg-zinc-50 transition-all px-0">
               <i className="fas fa-chevron-right text-[10px]"></i>
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -516,15 +531,12 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
         })}
 
         {activeClasses.length === 0 && (
-          <div className="py-24 text-center bg-zinc-50/50 rounded-[4rem] border border-dashed border-zinc-200 group hover:border-brand/30 transition-colors">
-            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-8 shadow-sm group-hover:scale-110 transition-transform duration-500">
-              <i className="fas fa-calendar-day text-zinc-100 text-4xl"></i>
-            </div>
-            <h4 className="text-xl font-bebas text-zinc-400 mb-2 tracking-wide uppercase">Día sin sesiones</h4>
-            <p className="text-zinc-400 font-bold uppercase text-[9px] tracking-widest max-w-xs mx-auto leading-relaxed">
-              No hay horarios para el <span className="text-zinc-900">{activeDate.dayNum} de {activeDate.fullMonth}</span>. Por favor intenta otra fecha arriba.
-            </p>
-          </div>
+          <EmptyState
+            icon="fa-calendar-day"
+            title="Día sin sesiones"
+            description={`No hay horarios para el ${activeDate.dayNum} de ${activeDate.fullMonth}. Por favor intenta otra fecha arriba.`}
+            className="py-24 text-center bg-zinc-50/50 rounded-[4rem] border border-dashed border-zinc-200"
+          />
         )}
       </div>
 
@@ -540,6 +552,6 @@ export const Schedule: React.FC<ScheduleProps> = ({ instances, availability, use
           <i className="fas fa-clock text-xl"></i>
         </div>
       </div>
-    </div>
+    </Card>
   );
 };

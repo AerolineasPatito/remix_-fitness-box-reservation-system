@@ -4,7 +4,8 @@ import { Button } from './Button.tsx';
 export interface EmptyStateProps {
   title: string;
   message?: string;
-  icon?: React.ReactNode;
+  description?: string;
+  icon?: React.ReactNode | string;
   actionLabel?: string;
   onAction?: () => void;
   compact?: boolean;
@@ -14,22 +15,28 @@ export interface EmptyStateProps {
 export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   message,
+  description,
   icon,
   actionLabel,
   onAction,
   compact = false,
   className = ''
-}) => (
+}) => {
+  const resolvedMessage = message || description;
+  const iconNode = typeof icon === 'string'
+    ? <i className={`fas ${icon} text-3xl`} aria-hidden="true"></i>
+    : (icon || <i className="fas fa-inbox text-3xl" aria-hidden="true"></i>);
+  return (
   <div className={`text-center border rounded-2xl ${compact ? 'p-4' : 'p-8'} ${className}`} style={{ borderColor: 'var(--color-neutral-200)', backgroundColor: 'var(--color-surface)' }}>
     <div className="mb-3" style={{ color: 'var(--color-neutral-400)' }}>
-      {icon || <i className="fas fa-inbox text-3xl" aria-hidden="true"></i>}
+      {iconNode}
     </div>
     <p className="font-black uppercase tracking-widest" style={{ color: 'var(--color-neutral-700)' }}>
       {title}
     </p>
-    {message ? (
+    {resolvedMessage ? (
       <p className="text-sm mt-2" style={{ color: 'var(--color-neutral-500)' }}>
-        {message}
+        {resolvedMessage}
       </p>
     ) : null}
     {actionLabel && onAction ? (
@@ -40,5 +47,5 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       </div>
     ) : null}
   </div>
-);
-
+  );
+};

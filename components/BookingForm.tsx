@@ -25,6 +25,19 @@ const buildPolicyLines = (hours: number) => [
   '• Cancelación por parte del negocio: En caso de que una clase sea cancelada por el coach o por no alcanzar el mínimo de participantes, recibirás una notificación por correo y tu crédito será devuelto en su totalidad.'
 ];
 
+const buildPolicyLinesV2 = (hours: number, minParticipants: number) => [
+  'Política de Cancelación y Reservación',
+  '',
+  'Para garantizar una experiencia justa para todos nuestros alumnos,',
+  'te pedimos tomar en cuenta lo siguiente:',
+  '',
+  `• Cancelación con tiempo: Puedes cancelar tu clase con al menos ${hours} horas de anticipación sin penalización. Tu crédito será devuelto automáticamente.`,
+  '• Cancelación tardía: Si cancelas fuera de ese límite, el crédito de la clase no será reembolsado.',
+  '• Puntualidad: Te recomendamos llegar con anticipación. La clase inicia en el horario establecido.',
+  '• Capacidad: Las clases tienen un cupo limitado. Tu lugar queda confirmado únicamente al completar la reservación.',
+  `• Cancelación por parte del negocio: Si una clase se cancela por no alcanzar el mínimo requerido de ${minParticipants} participante${minParticipants === 1 ? '' : 's'}, recibirás una notificación por correo y tu crédito será devuelto en su totalidad.`
+];
+
 export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuccess }) => {
   const { instanceId } = useParams();
   const navigate = useNavigate();
@@ -64,7 +77,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({ user, instances, onSuc
     return formatCancellationDeadline(deadline);
   }, [inst, policySettings]);
 
-  const policyText = useMemo(() => buildPolicyLines(policySettings.cancellation_limit_hours), [policySettings.cancellation_limit_hours]);
+  const classMinParticipants = Math.max(1, Number(inst?.min_capacity || 1));
+  const policyText = useMemo(
+    () => buildPolicyLinesV2(policySettings.cancellation_limit_hours, classMinParticipants),
+    [policySettings.cancellation_limit_hours, classMinParticipants]
+  );
 
   if (!inst) return <div className="text-center py-20 uppercase font-black tracking-widest text-zinc-300">Sesión expirada o no encontrada.</div>;
 

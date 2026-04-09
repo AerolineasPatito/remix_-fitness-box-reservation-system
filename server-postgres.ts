@@ -1,4 +1,4 @@
-﻿import express, { type Request } from 'express';
+import express, { type Request } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -11,12 +11,18 @@ import dotenv from 'dotenv';
 import { readFile, writeFile } from 'node:fs/promises';
 import { emailService } from './lib/emailService.ts';
 import crypto from 'node:crypto';
+import {
+  calculateCancellationDeadline as calculateCancellationDeadlineTz,
+  DEFAULT_APP_TIMEZONE
+} from './lib/cancellationPolicy.ts';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
+process.env.TZ = process.env.APP_TIMEZONE || DEFAULT_APP_TIMEZONE;
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT || 3000);
+const APP_TIMEZONE = process.env.APP_TIMEZONE || DEFAULT_APP_TIMEZONE;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -85,6 +91,12 @@ const app = express();
 app.use(cors());
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
+app.use('/api', (_req, res, next) => {
+  if (!res.getHeader('Content-Type')) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  }
+  next();
+});
 
 const query = async <T = any>(text: string, params: any[] = []) => {
   const res = await pgPool.query<T>(text, params);
@@ -174,7 +186,7 @@ const buildEmailLayout = (title: string, subtitle: string, contentHtml: string) 
     <div style="background: #ffffff; border-radius: 0 0 20px 20px; padding: 28px; border: 1px solid #e5e7eb;">
       <h2 style="margin: 0 0 12px; color: #111827; font-size: 22px;">${title}</h2>
       ${contentHtml}
-      <p style="margin: 22px 0 0; color: #6b7280; font-size: 12px;">Â© ${new Date().getFullYear()} Focus Fitness</p>
+      <p style="margin: 22px 0 0; color: #6b7280; font-size: 12px;">© ${new Date().getFullYear()} Focus Fitness</p>
     </div>
   </div>
 `;
@@ -192,33 +204,9 @@ const getSettings = async () => {
   };
 };
 
-const buildDateWithClock = (baseDate: Date, hhmm: string) => {
-  const [hour, minute] = String(hhmm || '00:00').split(':').map(Number);
-  const next = new Date(baseDate);
-  next.setHours(hour, minute, 0, 0);
-  return next;
-};
-
 const calculateCancellationDeadline = async (classDate: string, classStartTime: string) => {
   const settings = await getSettings();
-  const classDateTime = new Date(`${classDate}T${String(classStartTime || '00:00').slice(0, 5)}:00`);
-  const normalDeadline = new Date(
-    classDateTime.getTime() - Number(settings.cancellation_limit_hours || 8) * 60 * 60 * 1000
-  );
-
-  const [cutoffHour, cutoffMinute] = String(settings.cancellation_cutoff_morning || '08:00')
-    .split(':')
-    .map(Number);
-  const normalMinutes = normalDeadline.getHours() * 60 + normalDeadline.getMinutes();
-  const cutoffMinutes = cutoffHour * 60 + cutoffMinute;
-
-  if (normalMinutes < cutoffMinutes) {
-    const previousDay = new Date(classDateTime);
-    previousDay.setDate(previousDay.getDate() - 1);
-    return buildDateWithClock(previousDay, settings.cancellation_deadline_evening || '22:00');
-  }
-
-  return normalDeadline;
+  return calculateCancellationDeadlineTz(classDate, classStartTime, settings, APP_TIMEZONE);
 };
 
 const syncStudentCredits = async (studentId: string) => {
@@ -255,7 +243,7 @@ app.get('/api/system-settings/public', async (_req, res) => {
     const settings = await getSettings();
     res.json(settings);
   } catch {
-    res.status(500).json({ error: 'No se pudo obtener la configuraciÃ³n del sistema.' });
+    res.status(500).json({ error: 'No se pudo obtener la configuración del sistema.' });
   }
 });
 
@@ -390,7 +378,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     const existingProfile = await getOne<any>(`SELECT id, deleted_at FROM profiles WHERE email = $1`, [email]);
     if (existingProfile && !existingProfile.deleted_at) {
-      return res.status(400).json({ error: 'El correo electrÃ³nico ya estÃ¡ registrado.' });
+      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -432,8 +420,8 @@ app.post('/api/auth/register', async (req, res) => {
         to: email,
         subject: 'Verifica tu correo - Focus Fitness',
         html: buildEmailLayout(
-          'Â¡Bienvenido a Focus Fitness!',
-          'ConfirmaciÃ³n de correo',
+          '¡Bienvenido a Focus Fitness!',
+          'Confirmación de correo',
           `
             <p style="color:#374151;line-height:1.6;margin:0 0 16px;">Tu perfil fue creado correctamente. Para activarlo, confirma tu correo.</p>
             <p style="margin: 20px 0;">
@@ -444,7 +432,7 @@ app.post('/api/auth/register', async (req, res) => {
         )
       })
       .catch((err) => {
-        console.error('Error enviando correo de verificaciÃ³n:', err?.message || err);
+        console.error('Error enviando correo de verificación:', err?.message || err);
       });
 
     res.status(201).json({
@@ -463,31 +451,31 @@ app.post('/api/auth/login', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '').trim();
     if (!email || !password) {
-      return res.status(400).json({ error: 'Ingresa tu correo y contraseÃ±a.' });
+      return res.status(400).json({ error: 'Ingresa tu correo y contraseña.' });
     }
 
     const user = await getOne(`SELECT * FROM profiles WHERE email = $1 AND deleted_at IS NULL`, [email]);
     if (!user || !user.password_hash) {
-      return res.status(401).json({ error: 'Correo o contraseÃ±a incorrectos.' });
+      return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
     }
 
     const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ error: 'Correo o contraseÃ±a incorrectos.' });
+    if (!ok) return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
     if (!Boolean(user.email_verified)) {
-      return res.status(401).json({ error: 'Debes verificar tu correo antes de iniciar sesiÃ³n.' });
+      return res.status(401).json({ error: 'Debes verificar tu correo antes de iniciar sesión.' });
     }
 
     const safeUser = sanitizeProfile(user);
     res.json({ success: true, user: safeUser, session: { user: safeUser } });
   } catch {
-    res.status(500).json({ error: 'No se pudo iniciar sesiÃ³n. Intenta de nuevo.' });
+    res.status(500).json({ error: 'No se pudo iniciar sesión. Intenta de nuevo.' });
   }
 });
 
 app.get('/api/verify-email', async (req, res) => {
   try {
     const token = String(req.query?.token || '').trim();
-    if (!token) return res.status(400).json({ success: false, error: 'Token de verificaciÃ³n invÃ¡lido.' });
+    if (!token) return res.status(400).json({ success: false, error: 'Token de verificación inválido.' });
 
     const user = await getOne<any>(
       `
@@ -498,12 +486,12 @@ app.get('/api/verify-email', async (req, res) => {
     `,
       [token]
     );
-    if (!user) return res.status(400).json({ success: false, error: 'El enlace de verificaciÃ³n no es vÃ¡lido.' });
+    if (!user) return res.status(400).json({ success: false, error: 'El enlace de verificación no es válido.' });
     if (Boolean(user.email_verified)) {
       return res.json({ success: true, message: 'Tu correo ya estaba verificado.' });
     }
     if (user.email_verification_expires && new Date(user.email_verification_expires).getTime() < Date.now()) {
-      return res.status(400).json({ success: false, error: 'El enlace de verificaciÃ³n expirÃ³. RegÃ­strate de nuevo.' });
+      return res.status(400).json({ success: false, error: 'El enlace de verificación expiró. Regístrate de nuevo.' });
     }
 
     await query(
@@ -527,7 +515,7 @@ app.get('/api/verify-email', async (req, res) => {
 app.post('/api/forgot-password', async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
-    if (!email) return res.status(400).json({ success: false, error: 'Ingresa un correo vÃ¡lido.' });
+    if (!email) return res.status(400).json({ success: false, error: 'Ingresa un correo válido.' });
 
     const profile = await getOne<any>(`SELECT id, full_name FROM profiles WHERE email = $1 AND deleted_at IS NULL`, [email]);
     if (!profile) {
@@ -551,14 +539,14 @@ app.post('/api/forgot-password', async (req, res) => {
     void emailService
       .sendEmail({
         to: email,
-        subject: 'Restablece tu contraseÃ±a - Focus Fitness',
+        subject: 'Restablece tu contraseña - Focus Fitness',
         html: buildEmailLayout(
-          'Restablecer contraseÃ±a',
+          'Restablecer contraseña',
           'Seguridad de cuenta',
           `
-            <p style="color:#374151;line-height:1.6;margin:0 0 16px;">Hola${profile?.full_name ? `, ${profile.full_name}` : ''}. Recibimos una solicitud para restablecer tu contraseÃ±a.</p>
+            <p style="color:#374151;line-height:1.6;margin:0 0 16px;">Hola${profile?.full_name ? `, ${profile.full_name}` : ''}. Recibimos una solicitud para restablecer tu contraseña.</p>
             <p style="margin: 20px 0;">
-              <a href="${resetUrl}" style="display:inline-block;background:#111827;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Crear nueva contraseÃ±a</a>
+              <a href="${resetUrl}" style="display:inline-block;background:#111827;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Crear nueva contraseña</a>
             </p>
             <p style="color:#6b7280;font-size:13px;margin:0;">Este enlace expira en 1 hora.</p>
           `
@@ -579,7 +567,7 @@ app.post('/api/reset-password', async (req, res) => {
     const token = String(req.body?.token || '').trim();
     const newPassword = String(req.body?.newPassword || '').trim();
     if (!token || newPassword.length < 6) {
-      return res.status(400).json({ success: false, error: 'Datos invÃ¡lidos para restablecer contraseÃ±a.' });
+      return res.status(400).json({ success: false, error: 'Datos inválidos para restablecer contraseña.' });
     }
 
     const profile = await getOne<any>(
@@ -591,9 +579,9 @@ app.post('/api/reset-password', async (req, res) => {
     `,
       [token]
     );
-    if (!profile) return res.status(400).json({ success: false, error: 'El enlace de restablecimiento no es vÃ¡lido.' });
+    if (!profile) return res.status(400).json({ success: false, error: 'El enlace de restablecimiento no es válido.' });
     if (profile.password_reset_expires && new Date(profile.password_reset_expires).getTime() < Date.now()) {
-      return res.status(400).json({ success: false, error: 'El enlace de restablecimiento expirÃ³.' });
+      return res.status(400).json({ success: false, error: 'El enlace de restablecimiento expiró.' });
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
@@ -610,7 +598,7 @@ app.post('/api/reset-password', async (req, res) => {
     );
     res.json({ success: true });
   } catch {
-    res.status(500).json({ success: false, error: 'No se pudo restablecer la contraseÃ±a.' });
+    res.status(500).json({ success: false, error: 'No se pudo restablecer la contraseña.' });
   }
 });
 
@@ -633,7 +621,7 @@ app.post('/api/profile/:id/policy-acceptance', async (req, res) => {
     const profile = await getOne(`SELECT * FROM profiles WHERE id = $1`, [req.params.id]);
     res.json({ success: true, profile: sanitizeProfile(profile) });
   } catch {
-    res.status(500).json({ error: 'No se pudo registrar la aceptaciÃ³n de polÃ­ticas.' });
+    res.status(500).json({ error: 'No se pudo registrar la aceptación de políticas.' });
   }
 });
 
@@ -883,7 +871,7 @@ app.post('/api/classes', async (req, res) => {
       return res.status(400).json({ error: 'Completa fecha, horario y tipo de clase.' });
     }
     if (!Number.isFinite(minCapacity) || !Number.isFinite(maxCapacity) || minCapacity < 1 || maxCapacity < minCapacity) {
-      return res.status(400).json({ error: 'La capacidad mÃ­nima y mÃ¡xima no es vÃ¡lida.' });
+      return res.status(400).json({ error: 'La capacidad mínima y máxima no es válida.' });
     }
 
     const classType = await getOne(`SELECT name FROM class_types WHERE id = $1`, [classTypeId]);
@@ -921,7 +909,7 @@ app.post('/api/classes/recurring', async (req, res) => {
     const createdBy = String(req.body?.created_by || req.body?.createdBy || '').trim() || null;
 
     if (!classTypeId || !startDate || !startTime || !endTime) {
-      return res.status(400).json({ error: 'Completa los datos de la programaciÃ³n recurrente.' });
+      return res.status(400).json({ error: 'Completa los datos de la programación recurrente.' });
     }
 
     const classType = await getOne(`SELECT name FROM class_types WHERE id = $1`, [classTypeId]);
@@ -966,7 +954,7 @@ app.post('/api/classes/recurring', async (req, res) => {
 
     res.status(201).json({ success: true, createdCount: created.length, created });
   } catch {
-    res.status(500).json({ error: 'No se pudo crear la programaciÃ³n recurrente.' });
+    res.status(500).json({ error: 'No se pudo crear la programación recurrente.' });
   }
 });
 
@@ -1080,7 +1068,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
 
     const businessEmail = await getBusinessNotificationEmail();
     const notifiedLines = activeReservations.map(
-      (row) => `- ${row.full_name || 'Alumno'} â€” ${row.email || 'sin correo'} â€” ${row.whatsapp_phone || 'sin WhatsApp'}`
+      (row) => `- ${row.full_name || 'Alumno'} — ${row.email || 'sin correo'} — ${row.whatsapp_phone || 'sin WhatsApp'}`
     );
 
     if (businessEmail) {
@@ -1089,19 +1077,19 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
           to: businessEmail,
           subject: `Clase cancelada por coach - ${classInfo.type}`,
           html: buildEmailLayout(
-            'CancelaciÃ³n de clase',
+            'Cancelación de clase',
             'Alerta interna',
             `
               <p style="color:#374151;margin:0 0 8px;"><strong>Clase:</strong> ${classInfo.type}</p>
               <p style="color:#374151;margin:0 0 8px;"><strong>Horario:</strong> ${classInfo.date} ${String(classInfo.start_time || '').slice(0, 5)} - ${String(classInfo.end_time || '').slice(0, 5)}</p>
               <p style="color:#374151;margin:0 0 8px;"><strong>Origen:</strong> Coach</p>
-              <p style="color:#374151;margin:0 0 8px;"><strong>Motivo:</strong> CancelaciÃ³n manual desde panel del coach</p>
+              <p style="color:#374151;margin:0 0 8px;"><strong>Motivo:</strong> Cancelación manual desde panel del coach</p>
               <p style="color:#111827;margin:14px 0 8px;"><strong>Alumnos notificados:</strong></p>
               <pre style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:0;">${notifiedLines.length ? notifiedLines.join('\n') : '- Sin alumnos inscritos'}</pre>
             `
           )
         })
-        .catch((err) => console.error('Error correo de cancelaciÃ³n al negocio:', err?.message || err));
+        .catch((err) => console.error('Error correo de cancelación al negocio:', err?.message || err));
     }
 
     for (const participant of activeReservations) {
@@ -1112,15 +1100,15 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
           subject: `Tu clase fue cancelada - ${classInfo.type}`,
           html: buildEmailLayout(
             'Clase cancelada',
-            'ActualizaciÃ³n de clase',
+            'Actualización de clase',
             `
               <p style="color:#374151;line-height:1.6;margin:0 0 10px;">Hola ${participant.full_name || 'atleta'},</p>
               <p style="color:#374151;line-height:1.6;margin:0 0 10px;">Te avisamos que la clase <strong>${classInfo.type}</strong> (${classInfo.date} ${String(classInfo.start_time || '').slice(0, 5)} - ${String(classInfo.end_time || '').slice(0, 5)}) fue cancelada por el coach.</p>
-              <p style="color:#374151;margin:0;">Tu crÃ©dito fue devuelto automÃ¡ticamente.</p>
+              <p style="color:#374151;margin:0;">Tu crédito fue devuelto automáticamente.</p>
             `
           )
         })
-        .catch((err) => console.error('Error correo de cancelaciÃ³n a alumno:', err?.message || err));
+        .catch((err) => console.error('Error correo de cancelación a alumno:', err?.message || err));
     }
 
     res.json({ success: true, refunded_students: affectedStudentIds.length });
@@ -1204,7 +1192,7 @@ app.post('/api/reservations', async (req, res) => {
     const userId = String(req.body?.userId || '').trim();
     const classId = String(req.body?.classId || '').trim();
     if (!userId || !classId) {
-      return res.status(400).json({ error: 'Faltan datos para crear la reservaciÃ³n.' });
+      return res.status(400).json({ error: 'Faltan datos para crear la reservación.' });
     }
 
     await client.query('BEGIN');
@@ -1218,7 +1206,7 @@ app.post('/api/reservations', async (req, res) => {
     );
     if (existingReservation.rowCount) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Ya tienes una reservaciÃ³n activa para esta clase.' });
+      return res.status(400).json({ error: 'Ya tienes una reservación activa para esta clase.' });
     }
 
     const classInfoResult = await client.query(
@@ -1236,7 +1224,7 @@ app.post('/api/reservations', async (req, res) => {
     }
     if (classInfo.status !== 'active') {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Esta clase no estÃ¡ disponible para reservar.' });
+      return res.status(400).json({ error: 'Esta clase no está disponible para reservar.' });
     }
 
     const countResult = await client.query(
@@ -1279,11 +1267,11 @@ app.post('/api/reservations', async (req, res) => {
     const beneficiary: any = beneficiaryResult.rows[0];
     if (!beneficiary) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'No tienes crÃ©ditos suficientes para reservar esta clase.' });
+      return res.status(400).json({ error: 'No tienes créditos suficientes para reservar esta clase.' });
     }
     if (Number(beneficiary.congelado || 0) === 1) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Tu suscripciÃ³n estÃ¡ pausada temporalmente.' });
+      return res.status(400).json({ error: 'Tu suscripción está pausada temporalmente.' });
     }
     if (beneficiary.fecha_vencimiento && String(beneficiary.fecha_vencimiento).slice(0, 10) < classInfo.date) {
       await client.query('ROLLBACK');
@@ -1336,7 +1324,9 @@ app.post('/api/reservations', async (req, res) => {
         startTime: String(classInfo.start_time || '').slice(0, 5),
         endTime: String(classInfo.end_time || '').slice(0, 5),
         ticketId: reservationId,
+        minParticipants: Math.max(1, Number(classInfo.min_capacity || 1)),
         cancellationDeadlineLabel: cancellationDeadline.toLocaleString('es-MX', {
+          timeZone: APP_TIMEZONE,
           weekday: 'short',
           day: '2-digit',
           month: 'short',
@@ -1361,14 +1351,14 @@ app.post('/api/reservations', async (req, res) => {
     });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(500).json({ error: 'No se pudo crear la reservaciÃ³n. Intenta de nuevo.' });
+    res.status(500).json({ error: 'No se pudo crear la reservación. Intenta de nuevo.' });
   } finally {
     client.release();
   }
 
   if (reservationPayload?.to) {
-    void emailService.sendReservationConfirmation(reservationPayload.to, reservationPayload.details).catch((err) => {
-      console.error('Error enviando confirmaciÃ³n de reserva:', err?.message || err);
+    void emailService.sendReservationConfirmationV2(reservationPayload.to, reservationPayload.details).catch((err) => {
+      console.error('Error enviando confirmación de reserva:', err?.message || err);
     });
   }
 });
@@ -1392,11 +1382,11 @@ app.delete('/api/reservations/:id', async (req, res) => {
     const reservation: any = reservationResult.rows[0];
     if (!reservation) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'No encontramos la reservaciÃ³n solicitada.' });
+      return res.status(404).json({ error: 'No encontramos la reservación solicitada.' });
     }
     if (reservation.status !== 'active') {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Esta reservaciÃ³n ya no estÃ¡ activa.' });
+      return res.status(400).json({ error: 'Esta reservación ya no está activa.' });
     }
 
     const deadline = await calculateCancellationDeadline(reservation.date, reservation.start_time);
@@ -1459,7 +1449,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
     res.json({ success: true, refunded: canRefund, cancellationDeadline: deadline.toISOString() });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(500).json({ error: 'No se pudo cancelar la reservaciÃ³n.' });
+    res.status(500).json({ error: 'No se pudo cancelar la reservación.' });
   } finally {
     client.release();
   }
@@ -1468,36 +1458,36 @@ app.delete('/api/reservations/:id', async (req, res) => {
     void emailService
       .sendEmail({
         to: cancellationMailPayload.studentEmail,
-        subject: `CancelaciÃ³n de reserva - ${cancellationMailPayload.classType}`,
+        subject: `Cancelación de reserva - ${cancellationMailPayload.classType}`,
         html: buildEmailLayout(
           'Reserva cancelada',
-          'ActualizaciÃ³n de clase',
+          'Actualización de clase',
           `
             <p style="color:#374151;line-height:1.6;margin:0 0 12px;">Tu reserva para <strong>${cancellationMailPayload.classType}</strong> (${cancellationMailPayload.classDate} ${cancellationMailPayload.classStart}-${cancellationMailPayload.classEnd}) fue cancelada.</p>
-            <p style="color:#374151;margin:0;">${cancellationMailPayload.refunded ? 'Tu crÃ©dito fue devuelto.' : 'Esta cancelaciÃ³n fue tardÃ­a y el crÃ©dito no es reembolsable.'}</p>
+            <p style="color:#374151;margin:0;">${cancellationMailPayload.refunded ? 'Tu crédito fue devuelto.' : 'Esta cancelación fue tardía y el crédito no es reembolsable.'}</p>
           `
         )
       })
-      .catch((err) => console.error('Error enviando correo de cancelaciÃ³n al alumno:', err?.message || err));
+      .catch((err) => console.error('Error enviando correo de cancelación al alumno:', err?.message || err));
   }
 
   if (cancellationMailPayload?.businessEmail) {
     void emailService
       .sendEmail({
         to: cancellationMailPayload.businessEmail,
-        subject: `CancelaciÃ³n de alumno - ${cancellationMailPayload.classType}`,
+        subject: `Cancelación de alumno - ${cancellationMailPayload.classType}`,
         html: buildEmailLayout(
-          'CancelaciÃ³n registrada',
+          'Cancelación registrada',
           'Alerta interna',
           `
             <p style="color:#374151;margin:0 0 8px;"><strong>Alumno:</strong> ${cancellationMailPayload.studentName}</p>
             <p style="color:#374151;margin:0 0 8px;"><strong>Clase:</strong> ${cancellationMailPayload.classType}</p>
             <p style="color:#374151;margin:0 0 8px;"><strong>Horario:</strong> ${cancellationMailPayload.classDate} ${cancellationMailPayload.classStart}-${cancellationMailPayload.classEnd}</p>
-            <p style="color:#374151;margin:0;"><strong>Reembolso:</strong> ${cancellationMailPayload.refunded ? 'SÃ­' : 'No (cancelaciÃ³n tardÃ­a)'}</p>
+            <p style="color:#374151;margin:0;"><strong>Reembolso:</strong> ${cancellationMailPayload.refunded ? 'Sí' : 'No (cancelación tardía)'}</p>
           `
         )
       })
-      .catch((err) => console.error('Error enviando correo de cancelaciÃ³n al negocio:', err?.message || err));
+      .catch((err) => console.error('Error enviando correo de cancelación al negocio:', err?.message || err));
   }
 });
 
@@ -1584,13 +1574,13 @@ app.patch('/api/profiles/:id/credits', async (req, res) => {
     const id = req.params.id;
     const credits = Number(req.body?.credits);
     if (!Number.isFinite(credits) || credits < 0) {
-      return res.status(400).json({ error: 'El valor de crÃ©ditos no es vÃ¡lido.' });
+      return res.status(400).json({ error: 'El valor de créditos no es válido.' });
     }
     await query(`UPDATE profiles SET credits_remaining = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id, credits]);
     const profile = await getOne(`SELECT * FROM profiles WHERE id = $1`, [id]);
     res.json({ success: true, profile: sanitizeProfile(profile) });
   } catch {
-    res.status(500).json({ error: 'No se pudieron actualizar los crÃ©ditos.' });
+    res.status(500).json({ error: 'No se pudieron actualizar los créditos.' });
   }
 });
 
@@ -2082,7 +2072,7 @@ app.post('/api/coach/subscriptions', async (req, res) => {
     res.status(201).json({ ...created, reused });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(500).json({ error: 'No se pudo registrar la suscripciÃ³n.' });
+    res.status(500).json({ error: 'No se pudo registrar la suscripción.' });
   } finally {
     client.release();
   }
@@ -2126,7 +2116,7 @@ app.post('/api/coach/subscriptions/:subscriptionId/beneficiaries', async (req, r
     const sub: any = subRes.rows[0];
     if (!sub) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'No se encontrÃ³ la suscripciÃ³n.' });
+      return res.status(404).json({ error: 'No se encontró la suscripción.' });
     }
 
     const countRes = await client.query(
@@ -2136,7 +2126,7 @@ app.post('/api/coach/subscriptions/:subscriptionId/beneficiaries', async (req, r
     const currentCount = Number(countRes.rows[0]?.total || 0);
     if (currentCount >= Number(sub.capacidad || 1)) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'La suscripciÃ³n ya alcanzÃ³ su capacidad mÃ¡xima de beneficiarios.' });
+      return res.status(400).json({ error: 'La suscripción ya alcanzó su capacidad máxima de beneficiarios.' });
     }
 
     await client.query(
@@ -2454,7 +2444,7 @@ app.post('/api/coach/students/:id/manual-credits', async (req, res) => {
     const amount = Number(req.body?.amount ?? 0);
     const reason = String(req.body?.reason || 'Ajuste manual').trim();
     if (!Number.isFinite(amount) || amount === 0) {
-      return res.status(400).json({ error: 'El ajuste de crÃ©ditos debe ser un nÃºmero distinto de cero.' });
+      return res.status(400).json({ error: 'El ajuste de créditos debe ser un número distinto de cero.' });
     }
     await client.query('BEGIN');
     const beneficiaryRes = await client.query(
@@ -2551,7 +2541,7 @@ app.post('/api/coach/students/:id/manual-credits', async (req, res) => {
     return res.json({ success: true, profile: sanitizeProfile(profile) });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(500).json({ error: 'No se pudo aplicar el ajuste de crÃ©ditos.' });
+    res.status(500).json({ error: 'No se pudo aplicar el ajuste de créditos.' });
   } finally {
     client.release();
   }
@@ -2576,7 +2566,7 @@ app.post('/api/coach/attendance', async (req, res) => {
       [alumnoId, claseId]
     );
     if (!reservation?.suscripcion_id) {
-      return res.status(404).json({ error: 'No encontramos una reservaciÃ³n asociada para este alumno en la clase seleccionada.' });
+      return res.status(404).json({ error: 'No encontramos una reservación asociada para este alumno en la clase seleccionada.' });
     }
     await query(
       `
@@ -3271,7 +3261,7 @@ app.get('/api/coach/analytics', async (_req, res) => {
       }
     });
   } catch {
-    res.status(500).json({ error: 'No se pudieron obtener las analÃ­ticas.' });
+    res.status(500).json({ error: 'No se pudieron obtener las analíticas.' });
   }
 });
 
@@ -3290,7 +3280,7 @@ app.get('/api/admin/stats', async (_req, res) => {
       totalCredits: Number(credits?.n || 0)
     });
   } catch {
-    res.status(500).json({ error: 'No se pudieron obtener las estadÃ­sticas.' });
+    res.status(500).json({ error: 'No se pudieron obtener las estadísticas.' });
   }
 });
 
@@ -3321,7 +3311,7 @@ app.post('/api/admin/profiles', async (req, res) => {
 
     const existingProfile = await getOne<any>(`SELECT id, deleted_at FROM profiles WHERE email = $1`, [email]);
     if (existingProfile && !existingProfile.deleted_at) {
-      return res.status(400).json({ error: 'El correo electrÃ³nico ya estÃ¡ registrado.' });
+      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -3543,7 +3533,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
     const reservation: any = reservationRes.rows[0];
     if (!reservation) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'No encontramos la reservaciÃ³n solicitada.' });
+      return res.status(404).json({ error: 'No encontramos la reservación solicitada.' });
     }
 
     const shouldRefund = String(reservation.status || '').toLowerCase() === 'active';
@@ -3589,7 +3579,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
     res.json({ success: true, refunded: shouldRefund });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    res.status(500).json({ error: 'No se pudo eliminar la reservaciÃ³n.' });
+    res.status(500).json({ error: 'No se pudo eliminar la reservación.' });
   } finally {
     client.release();
   }
@@ -3663,13 +3653,13 @@ app.put('/api/admin/change-password/:userId', async (req, res) => {
     const userId = req.params.userId;
     const newPassword = String(req.body?.newPassword || '').trim();
     if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'La nueva contraseÃ±a debe tener al menos 6 caracteres.' });
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres.' });
     }
     const hash = await bcrypt.hash(newPassword, 10);
     await query(`UPDATE profiles SET password_hash = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [userId, hash]);
     res.json({ success: true });
   } catch {
-    res.status(500).json({ error: 'No se pudo cambiar la contraseÃ±a.' });
+    res.status(500).json({ error: 'No se pudo cambiar la contraseña.' });
   }
 });
 
@@ -3678,7 +3668,7 @@ app.get('/api/email-config', async (_req, res) => {
     const config = await readEmailConfig();
     res.json(config);
   } catch {
-    res.status(500).json({ error: 'No se pudo cargar la configuraciÃ³n de correo.' });
+    res.status(500).json({ error: 'No se pudo cargar la configuración de correo.' });
   }
 });
 
@@ -3686,12 +3676,12 @@ app.post('/api/save-email-config', async (req, res) => {
   try {
     const config = (req.body?.config || req.body) as StoredEmailConfig;
     if (!config || typeof config !== 'object') {
-      return res.status(400).json({ error: 'ConfiguraciÃ³n de correo invÃ¡lida.' });
+      return res.status(400).json({ error: 'Configuración de correo inválida.' });
     }
     await persistEmailConfig(config);
-    res.json({ success: true, message: 'ConfiguraciÃ³n guardada exitosamente.' });
+    res.json({ success: true, message: 'Configuración guardada exitosamente.' });
   } catch {
-    res.status(500).json({ error: 'No se pudo guardar la configuraciÃ³n de correo.' });
+    res.status(500).json({ error: 'No se pudo guardar la configuración de correo.' });
   }
 });
 
@@ -3700,7 +3690,7 @@ app.post('/api/test-email', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const config = (req.body?.config || null) as StoredEmailConfig | null;
     if (!email) {
-      return res.status(400).json({ error: 'Ingresa un correo de prueba vÃ¡lido.' });
+      return res.status(400).json({ error: 'Ingresa un correo de prueba válido.' });
     }
 
     if (config && typeof config === 'object') {
@@ -3709,12 +3699,12 @@ app.post('/api/test-email', async (req, res) => {
 
     await emailService.sendEmail({
       to: email,
-      subject: 'Prueba de configuraciÃ³n SMTP - Focus Fitness',
+      subject: 'Prueba de configuración SMTP - Focus Fitness',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px;">
-          <h2 style="margin: 0 0 12px; color: #111827;">ConfiguraciÃ³n de correo verificada</h2>
-          <p style="margin: 0 0 8px; color: #374151;">Tu configuraciÃ³n SMTP estÃ¡ funcionando correctamente.</p>
-          <p style="margin: 0; color: #6b7280; font-size: 13px;">Focus Fitness Â· ${new Date().toLocaleString('es-MX')}</p>
+          <h2 style="margin: 0 0 12px; color: #111827;">Configuración de correo verificada</h2>
+          <p style="margin: 0 0 8px; color: #374151;">Tu configuración SMTP está funcionando correctamente.</p>
+          <p style="margin: 0; color: #6b7280; font-size: 13px;">Focus Fitness · ${new Date().toLocaleString('es-MX', { timeZone: APP_TIMEZONE })}</p>
         </div>
       `
     });
@@ -3723,7 +3713,7 @@ app.post('/api/test-email', async (req, res) => {
   } catch (error: any) {
     res.status(400).json({
       success: false,
-      error: error?.message || 'No se pudo enviar el correo de prueba con la configuraciÃ³n actual.'
+      error: error?.message || 'No se pudo enviar el correo de prueba con la configuración actual.'
     });
   }
 });

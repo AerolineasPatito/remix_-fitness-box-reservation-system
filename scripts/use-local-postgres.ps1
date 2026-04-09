@@ -1,0 +1,13 @@
+$env:PGHOST = "localhost"
+$env:PGPORT = "5433"
+$env:PGDATABASE = "cabreu145_focusfitness"
+$env:PGUSER = "cabreu145_focusfitness_user"
+$env:PGPASSWORD = "z3H11tv743BM"
+$env:DB_CLIENT = "postgres"
+
+Write-Host "Local PostgreSQL env loaded:"
+Write-Host "PGHOST=$env:PGHOST"
+Write-Host "PGPORT=$env:PGPORT"
+Write-Host "PGDATABASE=$env:PGDATABASE"
+Write-Host "PGUSER=$env:PGUSER"
+Write-Host "DB_CLIENT=$env:DB_CLIENT"

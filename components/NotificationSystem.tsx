@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
+import { Toast } from './ui/Toast.tsx';
 
 export type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
@@ -113,87 +114,23 @@ export const NotificationItem: React.FC<NotificationItemProps> = ({ notification
     window.setTimeout(onRemove, 220);
   };
 
-  const config =
-    notification.type === 'success'
-      ? { bg: 'from-emerald-500 to-emerald-600', icon: 'fa-check-circle', iconBg: 'bg-emerald-100 text-emerald-600', border: 'border-emerald-200' }
-      : notification.type === 'error'
-        ? { bg: 'from-rose-500 to-rose-600', icon: 'fa-triangle-exclamation', iconBg: 'bg-rose-100 text-rose-600', border: 'border-rose-200' }
-        : notification.type === 'warning'
-          ? { bg: 'from-amber-500 to-amber-600', icon: 'fa-circle-exclamation', iconBg: 'bg-amber-100 text-amber-600', border: 'border-amber-200' }
-          : { bg: 'from-brand to-cyan-600', icon: 'fa-circle-info', iconBg: 'bg-cyan-100 text-cyan-600', border: 'border-cyan-200' };
-
-  const detailsEntries = Object.entries(notification.details || {});
-
   return (
     <div
       className={`
-        relative bg-white rounded-2xl shadow-2xl border-2 ${config.border}
+        relative
         transform transition-all duration-300 ease-out
         ${isVisible && !isLeaving ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-full opacity-0 scale-95'}
       `}
     >
-      <div className={`bg-gradient-to-r ${config.bg} p-4`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${config.iconBg}`}>
-              <i className={`fas ${config.icon}`}></i>
-            </div>
-            <h3 className="font-bold text-white text-sm uppercase tracking-wider">{notification.title}</h3>
-          </div>
-          <button onClick={handleClose} className="text-white/85 hover:text-white p-1">
-            <i className="fas fa-times text-sm"></i>
-          </button>
-        </div>
-      </div>
-
-      <div className="p-4 space-y-3">
-        <p className="text-zinc-700 text-sm leading-relaxed">{notification.message}</p>
-
-        {detailsEntries.length > 0 && (
-          <div className="bg-zinc-50 rounded-xl p-3 space-y-2">
-            <h4 className="font-black text-xs text-zinc-600 uppercase tracking-wider">Detalles</h4>
-            {detailsEntries.map(([key, value]) => (
-              <div key={key} className="flex items-center justify-between text-xs gap-3">
-                <span className="text-zinc-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="font-bold text-zinc-900 text-right">{String(value)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {notification.suggestions && notification.suggestions.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="font-black text-xs text-zinc-600 uppercase tracking-wider">Sugerencias</h4>
-            <ul className="space-y-1">
-              {notification.suggestions.map((suggestion, idx) => (
-                <li key={idx} className="text-xs text-zinc-600 flex items-start gap-2">
-                  <i className="fas fa-lightbulb text-amber-500 mt-0.5"></i>
-                  <span>{suggestion}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {notification.actions && notification.actions.length > 0 && (
-          <div className="flex gap-2 pt-1">
-            {notification.actions.map((action, idx) => (
-              <button
-                key={idx}
-                onClick={action.onClick}
-                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-                  action.variant === 'primary'
-                    ? 'bg-brand text-white hover:bg-cyan-600'
-                    : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
-                }`}
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <Toast
+        type={notification.type}
+        title={notification.title}
+        message={notification.message}
+        details={notification.details}
+        suggestions={notification.suggestions}
+        actions={notification.actions}
+        onClose={handleClose}
+      />
     </div>
   );
 };
-

@@ -1,10 +1,10 @@
 {
-  "provider": "console",
+  "provider": "smtp",
   "smtp": {
     "host": "cabreudev.com",
     "port": 465,
     "secure": true,
     "user": "testing@cabreudev.com",
-    "pass": "Cran1306.18"
+    "pass": "6MVHMx2rxHMZ"
   }
 }

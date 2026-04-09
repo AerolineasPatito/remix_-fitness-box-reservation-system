@@ -1,3 +1,39 @@
+:root {
+  --color-primary: #3794a4;
+  --color-primary-hover: #2e7c8a;
+
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f4f4f5;
+  --color-neutral-200: #e4e4e7;
+  --color-neutral-300: #d4d4d8;
+  --color-neutral-400: #a1a1aa;
+  --color-neutral-500: #71717a;
+  --color-neutral-600: #52525b;
+  --color-neutral-700: #3f3f46;
+  --color-neutral-800: #27272a;
+  --color-neutral-900: #18181b;
+
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #f43f5e;
+  --color-info: #06b6d4;
+
+  --color-surface: var(--color-neutral-0);
+  --color-surface-muted: var(--color-neutral-50);
+
+  --color-admin-surface: #f8f8f8;
+  --color-admin-accent: #417690;
+
+  --font-display: "Bebas Neue", cursive;
+  --font-ui: "Plus Jakarta Sans", sans-serif;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+}
+
 html,
 body {
   margin: 0;
@@ -7,6 +43,12 @@ body {
   overflow-x: clip;
   scrollbar-gutter: stable;
   -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--color-surface);
+  color: var(--color-neutral-900);
 }
 
 *,
@@ -42,3 +84,7 @@ textarea {
   min-height: 88px;
 }
 
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

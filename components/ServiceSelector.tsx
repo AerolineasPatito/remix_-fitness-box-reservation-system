@@ -20,13 +20,171 @@ interface ServiceSelectorProps {
 
 export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefreshData }) => {
   const location = useLocation();
-  const { classTypes, classTypesLoading } = useAppData();
+  const { classTypes, classTypesLoading, highlights, highlightsLoading } = useAppData();
   const showHomeCalendar = location.pathname === '/';
   const categories = (classTypes || []) as ClassCategory[];
+  const activeHighlights = Array.isArray(highlights) ? highlights : [];
+  const [highlightIndex, setHighlightIndex] = React.useState(0);
+  const [paused, setPaused] = React.useState(false);
+  const touchStartXRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (highlightIndex >= activeHighlights.length) {
+      setHighlightIndex(0);
+    }
+  }, [activeHighlights.length, highlightIndex]);
+
+  React.useEffect(() => {
+    if (paused || activeHighlights.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setHighlightIndex((prev) => (prev + 1) % activeHighlights.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [activeHighlights.length, paused]);
+
+  const goToHighlight = (nextIndex: number) => {
+    if (!activeHighlights.length) return;
+    const total = activeHighlights.length;
+    const normalized = ((nextIndex % total) + total) % total;
+    setHighlightIndex(normalized);
+  };
+
+  const currentHighlight = activeHighlights[highlightIndex] as any;
+
+  const renderHighlightCta = (item: any) => {
+    const label = String(item?.cta_label || '').trim() || 'Ver mas';
+    const url = String(item?.cta_url || '').trim();
+    const buttonClass =
+      'inline-flex w-full md:w-auto items-center justify-center px-5 py-3 min-h-[44px] rounded-xl bg-brand text-white text-[10px] font-black uppercase tracking-widest hover:opacity-90 transition-all';
+    if (!url) return <span className={buttonClass}>{label}</span>;
+    if (url.startsWith('/')) {
+      return (
+        <Link to={url} className={buttonClass}>
+          {label}
+        </Link>
+      );
+    }
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className={buttonClass}>
+        {label}
+      </a>
+    );
+  };
 
   return (
     <div className="py-12 sm:py-16 md:py-24 bg-white animate-in fade-in duration-1000">
       <div className="container mx-auto px-4">
+        {highlightsLoading ? (
+          <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-6 mb-8 text-center">
+            <i className="fas fa-circle-notch text-2xl text-brand animate-spin"></i>
+            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-[0.3em] mt-3">Cargando destacados</p>
+          </div>
+        ) : activeHighlights.length > 0 ? (
+          <section className="mb-8 max-w-6xl mx-auto">
+            <div className="mb-3 px-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.35em] text-cyan-600">Evento / promocion</p>
+            </div>
+            <div className="rounded-3xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+            <div
+              className="relative overflow-hidden select-none"
+            onMouseEnter={() => setPaused(true)}
+            onMouseLeave={() => setPaused(false)}
+            onTouchStart={(e) => {
+              setPaused(true);
+              touchStartXRef.current = e.touches?.[0]?.clientX ?? null;
+            }}
+            onTouchEnd={(e) => {
+              const startX = touchStartXRef.current;
+              const endX = e.changedTouches?.[0]?.clientX ?? null;
+              touchStartXRef.current = null;
+              if (startX == null || endX == null) {
+                setPaused(false);
+                return;
+              }
+              const delta = endX - startX;
+              if (Math.abs(delta) >= 40) {
+                if (delta < 0) goToHighlight(highlightIndex + 1);
+                if (delta > 0) goToHighlight(highlightIndex - 1);
+              }
+              setPaused(false);
+            }}
+          >
+            <div className="relative min-h-[300px] sm:min-h-[380px] md:min-h-[500px] lg:min-h-[560px]">
+              {currentHighlight?.image_url ? (
+                <>
+                  <img
+                    src={String(currentHighlight.image_url)}
+                    alt={String(currentHighlight.title || 'Highlight')}
+                    className="absolute inset-0 h-full w-full object-cover blur-md scale-110 opacity-40"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-b from-zinc-900/25 via-zinc-900/10 to-zinc-950/30" />
+                  <div className="relative z-10 h-full w-full flex items-center justify-center p-3 sm:p-5 md:p-7">
+                    <img
+                      src={String(currentHighlight.image_url)}
+                      alt={String(currentHighlight.title || 'Poster')}
+                      className="h-full max-h-[100%] w-auto max-w-full object-contain rounded-2xl border border-white/15 shadow-2xl"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-r from-zinc-900 via-zinc-800 to-zinc-700" />
+              )}
+            </div>
+
+            <div className="absolute top-1/2 -translate-y-1/2 left-2 sm:left-3 md:left-4 right-2 sm:right-3 md:right-4 flex items-center justify-between z-20 pointer-events-none">
+              <button
+                type="button"
+                onClick={() => goToHighlight(highlightIndex - 1)}
+                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all"
+                aria-label="Anterior"
+              >
+                <i className="fas fa-chevron-left text-sm"></i>
+              </button>
+              <button
+                type="button"
+                onClick={() => goToHighlight(highlightIndex + 1)}
+                className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 min-h-[44px] rounded-full bg-zinc-900/75 text-white border border-white/25 shadow-lg backdrop-blur-sm pointer-events-auto hover:bg-zinc-900/90 transition-all"
+                aria-label="Siguiente"
+              >
+                <i className="fas fa-chevron-right text-sm"></i>
+              </button>
+            </div>
+
+            </div>
+            <div className="border-t border-zinc-200 bg-white p-4 sm:p-5 md:p-6">
+              <div className="mb-2 sm:mb-3 flex items-center justify-center gap-2">
+                {activeHighlights.map((_: any, idx: number) => (
+                  <button
+                    key={`highlight_dot_${idx}`}
+                    type="button"
+                    onClick={() => goToHighlight(idx)}
+                    className="h-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    aria-label={`Ir al slide ${idx + 1}`}
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${idx === highlightIndex ? 'bg-zinc-900' : 'bg-zinc-300'}`} />
+                  </button>
+                ))}
+              </div>
+              <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 md:gap-6">
+                <div className="flex-1 min-w-0 space-y-2">
+                  <h2 className="text-xl sm:text-3xl font-bebas uppercase leading-none tracking-tight text-zinc-900 break-words">
+                    {String(currentHighlight?.title || '')}
+                  </h2>
+                  {String(currentHighlight?.subtitle || '').trim() && (
+                    <p className="text-sm sm:text-base text-zinc-600 break-words leading-relaxed">
+                      {String(currentHighlight?.subtitle || '')}
+                    </p>
+                  )}
+                </div>
+                <div className="md:shrink-0 w-full md:w-auto">
+                  {renderHighlightCta(currentHighlight)}
+                </div>
+              </div>
+            </div>
+            </div>
+          </section>
+        ) : null}
+
         <div className="max-w-3xl mx-auto text-center mb-12 sm:mb-16 space-y-4">
           <h1 className="text-4xl sm:text-5xl md:text-7xl font-bebas tracking-tighter text-zinc-900 leading-none">
             NUESTRAS <span className="text-brand">CLASES</span>
@@ -45,7 +203,7 @@ export const ServiceSelector: React.FC<ServiceSelectorProps> = ({ user, onRefres
               TIPOS DE <span className="text-brand">ENTRENAMIENTO</span>
             </h2>
             <p className="text-zinc-400 font-medium text-sm sm:text-base leading-relaxed px-4">
-              También puedes navegar por categoría para ir directo a tu disciplina.
+              Tambien puedes navegar por categoria para ir directo a tu disciplina.
             </p>
           </div>
         </div>

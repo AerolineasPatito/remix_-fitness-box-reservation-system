@@ -30,21 +30,36 @@ type SystemSettings = {
   cancellation_deadline_evening: string;
 };
 
+type HighlightItem = {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  image_url?: string | null;
+  cta_label?: string | null;
+  cta_url?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  sort_order?: number;
+};
+
 type AppDataContextType = {
   classTypes: ClassTypeItem[];
   classes: ClassInstance[];
   availability: AvailabilityState;
   packages: PackageItem[];
+  highlights: HighlightItem[];
   systemSettings: SystemSettings;
   classTypesLoading: boolean;
   classesLoading: boolean;
   availabilityLoading: boolean;
   packagesLoading: boolean;
+  highlightsLoading: boolean;
   settingsLoading: boolean;
   refreshClassTypes: () => Promise<void>;
   refreshClasses: () => Promise<void>;
   refreshAvailability: () => Promise<void>;
   refreshPackages: () => Promise<void>;
+  refreshHighlights: () => Promise<void>;
   refreshSettings: () => Promise<void>;
   refreshAll: () => Promise<void>;
 };
@@ -90,12 +105,14 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
   const [classes, setClasses] = useState<ClassInstance[]>([]);
   const [availability, setAvailability] = useState<AvailabilityState>({});
   const [packages, setPackages] = useState<PackageItem[]>([]);
+  const [highlights, setHighlights] = useState<HighlightItem[]>([]);
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(defaultSettings);
 
   const [classTypesLoading, setClassTypesLoading] = useState(false);
   const [classesLoading, setClassesLoading] = useState(false);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [packagesLoading, setPackagesLoading] = useState(false);
+  const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
 
   const refreshClassTypes = useCallback(async () => {
@@ -157,6 +174,20 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
     }
   }, [enabled, role]);
 
+  const refreshHighlights = useCallback(async () => {
+    if (!enabled) return;
+    setHighlightsLoading(true);
+    try {
+      const rows = await api.getActiveHighlights();
+      setHighlights(Array.isArray(rows) ? rows : []);
+    } catch (error: any) {
+      logger.error('Error refreshing highlights', error);
+      setHighlights([]);
+    } finally {
+      setHighlightsLoading(false);
+    }
+  }, [enabled]);
+
   const refreshSettings = useCallback(async () => {
     if (!enabled) return;
     setSettingsLoading(true);
@@ -181,9 +212,10 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
       refreshClasses(),
       refreshAvailability(),
       refreshPackages(),
+      refreshHighlights(),
       refreshSettings()
     ]);
-  }, [refreshAvailability, refreshClassTypes, refreshClasses, refreshPackages, refreshSettings]);
+  }, [refreshAvailability, refreshClassTypes, refreshClasses, refreshPackages, refreshHighlights, refreshSettings]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -205,6 +237,7 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
         refreshClassTypes(),
         refreshClasses(),
         refreshAvailability(),
+        refreshHighlights(),
         refreshSettings()
       ];
       if (role === 'coach' || role === 'admin') {
@@ -237,7 +270,7 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
         document.removeEventListener('visibilitychange', handleVisibility);
       }
     };
-  }, [enabled, pollIntervalMs, refreshAvailability, refreshClassTypes, refreshClasses, refreshPackages, refreshSettings, role]);
+  }, [enabled, pollIntervalMs, refreshAvailability, refreshClassTypes, refreshClasses, refreshPackages, refreshHighlights, refreshSettings, role]);
 
   const value = useMemo(
     () => ({
@@ -245,16 +278,19 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
       classes,
       availability,
       packages,
+      highlights,
       systemSettings,
       classTypesLoading,
       classesLoading,
       availabilityLoading,
       packagesLoading,
+      highlightsLoading,
       settingsLoading,
       refreshClassTypes,
       refreshClasses,
       refreshAvailability,
       refreshPackages,
+      refreshHighlights,
       refreshSettings,
       refreshAll
     }),
@@ -263,16 +299,19 @@ export const AppDataProvider: React.FC<AppDataProviderProps> = ({ children, enab
       classes,
       availability,
       packages,
+      highlights,
       systemSettings,
       classTypesLoading,
       classesLoading,
       availabilityLoading,
       packagesLoading,
+      highlightsLoading,
       settingsLoading,
       refreshClassTypes,
       refreshClasses,
       refreshAvailability,
       refreshPackages,
+      refreshHighlights,
       refreshSettings,
       refreshAll
     ]

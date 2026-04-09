@@ -56,6 +56,30 @@ const pgPool = new Pool({
 });
 
 const createId = (prefix = '') => `${prefix}${Math.random().toString(36).slice(2, 11)}`;
+const normalizeOptionalText = (value: any) => {
+  const parsed = String(value ?? '').trim();
+  return parsed ? parsed : null;
+};
+const normalizeOptionalTimestamp = (value: any) => {
+  if (value == null || value === '') return null;
+  const asText = String(value).trim();
+  if (!asText) return null;
+  const dt = new Date(asText);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+};
+const normalizeInteger = (value: any, fallback = 0) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+const normalizeActiveFlag = (value: any, fallback = 1) => {
+  if (value == null) return fallback;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  const txt = String(value).trim().toLowerCase();
+  if (txt === '1' || txt === 'true' || txt === 'active') return 1;
+  if (txt === '0' || txt === 'false' || txt === 'inactive') return 0;
+  return fallback;
+};
 
 const app = express();
 app.use(cors());
@@ -1671,6 +1695,225 @@ app.delete('/api/coach/packages/:id', async (req, res) => {
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'No se pudo dar de baja el paquete.' });
+  }
+});
+
+app.get('/api/coach/highlights', async (_req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        id,
+        title,
+        subtitle,
+        image_url,
+        cta_label,
+        cta_url,
+        start_at,
+        end_at,
+        sort_order,
+        is_active,
+        created_by,
+        updated_by,
+        created_at,
+        updated_at
+      FROM coach_highlights
+      WHERE deleted_at IS NULL
+      ORDER BY sort_order ASC, created_at DESC
+    `
+    );
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: 'No se pudieron obtener los highlights del negocio.' });
+  }
+});
+
+app.post('/api/coach/highlights', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    const subtitle = normalizeOptionalText(req.body?.subtitle);
+    const imageUrl = normalizeOptionalText(req.body?.image_url || req.body?.imageUrl);
+    const ctaLabel = normalizeOptionalText(req.body?.cta_label || req.body?.ctaLabel);
+    const ctaUrl = normalizeOptionalText(req.body?.cta_url || req.body?.ctaUrl);
+    const startAt = normalizeOptionalTimestamp(req.body?.start_at || req.body?.startAt);
+    const endAt = normalizeOptionalTimestamp(req.body?.end_at || req.body?.endAt);
+    const sortOrder = normalizeInteger(req.body?.sort_order ?? req.body?.sortOrder, 0);
+    const isActive = normalizeActiveFlag(req.body?.is_active ?? req.body?.isActive, 1);
+    const actorId = normalizeOptionalText(req.body?.actor_id || req.body?.actorId);
+
+    if (!title) {
+      return res.status(400).json({ error: 'El título del highlight es obligatorio.' });
+    }
+    if (startAt && endAt && new Date(endAt).getTime() < new Date(startAt).getTime()) {
+      return res.status(400).json({ error: 'La vigencia final no puede ser menor a la vigencia inicial.' });
+    }
+
+    const id = createId('hl_');
+    await query(
+      `
+      INSERT INTO coach_highlights (
+        id, title, subtitle, image_url, cta_label, cta_url, start_at, end_at, sort_order, is_active, created_by, updated_by, created_at, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+      )
+    `,
+      [id, title, subtitle, imageUrl, ctaLabel, ctaUrl, startAt, endAt, sortOrder, isActive, actorId]
+    );
+    const created = await getOne(
+      `
+      SELECT
+        id, title, subtitle, image_url, cta_label, cta_url, start_at, end_at, sort_order, is_active, created_by, updated_by, created_at, updated_at
+      FROM coach_highlights
+      WHERE id = $1
+    `,
+      [id]
+    );
+    res.status(201).json(created);
+  } catch {
+    res.status(500).json({ error: 'No se pudo crear el highlight.' });
+  }
+});
+
+app.put('/api/coach/highlights/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const existing = await getOne(`SELECT id FROM coach_highlights WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'No encontramos el highlight que intentas editar.' });
+    }
+
+    const title = String(req.body?.title || '').trim();
+    const subtitle = normalizeOptionalText(req.body?.subtitle);
+    const imageUrl = normalizeOptionalText(req.body?.image_url || req.body?.imageUrl);
+    const ctaLabel = normalizeOptionalText(req.body?.cta_label || req.body?.ctaLabel);
+    const ctaUrl = normalizeOptionalText(req.body?.cta_url || req.body?.ctaUrl);
+    const startAt = normalizeOptionalTimestamp(req.body?.start_at || req.body?.startAt);
+    const endAt = normalizeOptionalTimestamp(req.body?.end_at || req.body?.endAt);
+    const sortOrder = normalizeInteger(req.body?.sort_order ?? req.body?.sortOrder, 0);
+    const isActive = normalizeActiveFlag(req.body?.is_active ?? req.body?.isActive, 1);
+    const actorId = normalizeOptionalText(req.body?.actor_id || req.body?.actorId);
+
+    if (!title) {
+      return res.status(400).json({ error: 'El título del highlight es obligatorio.' });
+    }
+    if (startAt && endAt && new Date(endAt).getTime() < new Date(startAt).getTime()) {
+      return res.status(400).json({ error: 'La vigencia final no puede ser menor a la vigencia inicial.' });
+    }
+
+    await query(
+      `
+      UPDATE coach_highlights
+      SET title = $2,
+          subtitle = $3,
+          image_url = $4,
+          cta_label = $5,
+          cta_url = $6,
+          start_at = $7,
+          end_at = $8,
+          sort_order = $9,
+          is_active = $10,
+          updated_by = $11,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND deleted_at IS NULL
+    `,
+      [id, title, subtitle, imageUrl, ctaLabel, ctaUrl, startAt, endAt, sortOrder, isActive, actorId]
+    );
+    const updated = await getOne(
+      `
+      SELECT
+        id, title, subtitle, image_url, cta_label, cta_url, start_at, end_at, sort_order, is_active, created_by, updated_by, created_at, updated_at
+      FROM coach_highlights
+      WHERE id = $1
+    `,
+      [id]
+    );
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'No se pudo actualizar el highlight.' });
+  }
+});
+
+app.delete('/api/coach/highlights/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await query(
+      `
+      UPDATE coach_highlights
+      SET deleted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND deleted_at IS NULL
+    `,
+      [id]
+    );
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'No se pudo eliminar el highlight.' });
+  }
+});
+
+app.patch('/api/coach/highlights/:id/toggle', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const isActive = normalizeActiveFlag(req.body?.is_active ?? req.body?.isActive, 1);
+    const actorId = normalizeOptionalText(req.body?.actor_id || req.body?.actorId);
+    const existing = await getOne(`SELECT id FROM coach_highlights WHERE id = $1 AND deleted_at IS NULL`, [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'No encontramos el highlight que intentas actualizar.' });
+    }
+
+    await query(
+      `
+      UPDATE coach_highlights
+      SET is_active = $2,
+          updated_by = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND deleted_at IS NULL
+    `,
+      [id, isActive, actorId]
+    );
+    const updated = await getOne(
+      `
+      SELECT
+        id, title, subtitle, image_url, cta_label, cta_url, start_at, end_at, sort_order, is_active, created_by, updated_by, created_at, updated_at
+      FROM coach_highlights
+      WHERE id = $1
+    `,
+      [id]
+    );
+    res.json(updated);
+  } catch {
+    res.status(500).json({ error: 'No se pudo actualizar el estado del highlight.' });
+  }
+});
+
+app.get('/api/highlights/active', async (_req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT
+        id,
+        title,
+        subtitle,
+        image_url,
+        cta_label,
+        cta_url,
+        start_at,
+        end_at,
+        sort_order
+      FROM coach_highlights
+      WHERE deleted_at IS NULL
+        AND is_active = 1
+        AND (start_at IS NULL OR start_at <= CURRENT_TIMESTAMP)
+        AND (end_at IS NULL OR end_at >= CURRENT_TIMESTAMP)
+      ORDER BY sort_order ASC, created_at DESC
+    `
+    );
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: 'No se pudieron obtener los highlights activos.' });
   }
 });
 
@@ -3516,9 +3759,42 @@ const ensureAdmin = async () => {
   );
 };
 
+const ensureCoachHighlightsTable = async () => {
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS coach_highlights (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      subtitle TEXT,
+      image_url TEXT,
+      cta_label TEXT,
+      cta_url TEXT,
+      start_at TIMESTAMP,
+      end_at TIMESTAMP,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      updated_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      deleted_at TIMESTAMP,
+      FOREIGN KEY(created_by) REFERENCES profiles(id),
+      FOREIGN KEY(updated_by) REFERENCES profiles(id)
+    )
+  `
+  );
+  await query(
+    `
+    CREATE INDEX IF NOT EXISTS idx_coach_highlights_active_dates
+      ON coach_highlights(is_active, start_at, end_at, sort_order)
+  `
+  );
+};
+
 const start = async () => {
   try {
     await pgPool.query('SELECT 1');
+    await ensureCoachHighlightsTable();
     await ensureAdmin();
     app.listen(PORT, () => {
       console.log(`PostgreSQL server running on http://localhost:${PORT}`);

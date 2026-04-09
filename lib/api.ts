@@ -195,6 +195,10 @@ export const api = {
     const res = await fetch('/api/system-settings/public');
     return handleResponse(res);
   },
+  getActiveHighlights: async () => {
+    const res = await fetch('/api/highlights/active');
+    return handleResponse(res);
+  },
   getStudents: async () => {
     const res = await fetch('/api/students');
     return handleResponse(res);
@@ -380,6 +384,40 @@ export const api = {
       if (filters?.endDate) params.set('endDate', filters.endDate);
       const query = params.toString();
       const res = await fetch(`/api/coach/cash-cut${query ? `?${query}` : ''}`);
+      return handleResponse(res);
+    },
+    getHighlights: async () => {
+      const res = await fetch('/api/coach/highlights');
+      return handleResponse(res);
+    },
+    createHighlight: async (data: any) => {
+      const res = await fetch('/api/coach/highlights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return handleResponse(res);
+    },
+    updateHighlight: async (id: string, data: any) => {
+      const res = await fetch(`/api/coach/highlights/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return handleResponse(res);
+    },
+    deleteHighlight: async (id: string) => {
+      const res = await fetch(`/api/coach/highlights/${id}`, {
+        method: 'DELETE'
+      });
+      return handleResponse(res);
+    },
+    toggleHighlight: async (id: string, data: { is_active: number | boolean; actor_id?: string }) => {
+      const res = await fetch(`/api/coach/highlights/${id}/toggle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
       return handleResponse(res);
     }
   },

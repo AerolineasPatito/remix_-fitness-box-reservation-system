@@ -4,6 +4,7 @@ import { Profile } from '../types.ts';
 import { useAppData } from '../contexts/AppDataContext.tsx';
 import { emitStudentStateChanged } from '../lib/studentStateSync.ts';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { slugifyClassType } from '../lib/routeHelpers.ts';
 
 type CoachBusinessTab = 'creator' | 'community' | 'management' | 'cashcut';
 
@@ -53,6 +54,19 @@ interface WhatsAppTemplate {
   name: string;
   body: string;
   is_default_cancellation: number;
+}
+
+interface HighlightItem {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  image_url?: string | null;
+  cta_label?: string | null;
+  cta_url?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  sort_order?: number;
+  is_active?: number;
 }
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -105,11 +119,13 @@ const bumpIntegerInput = (
 
 export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) => {
   const {
+    classTypes: sharedClassTypes,
     packages: sharedPackages,
     classes: sharedClasses,
     refreshPackages,
     refreshClasses,
-    refreshAvailability
+    refreshAvailability,
+    refreshHighlights
   } = useAppData();
   const [activeTab, setActiveTab] = useState<CoachBusinessTab>('creator');
   const [loading, setLoading] = useState(false);
@@ -179,6 +195,46 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
   const [cashAvailableYears, setCashAvailableYears] = useState<number[]>([]);
   const [cashAvailableMonths, setCashAvailableMonths] = useState<number[]>([]);
   const [cashCutData, setCashCutData] = useState<any>(null);
+  const [highlights, setHighlights] = useState<HighlightItem[]>([]);
+  const [highlightForm, setHighlightForm] = useState({
+    id: '',
+    title: '',
+    subtitle: '',
+    image_url: '',
+    cta_label: '',
+    cta_mode: 'internal' as 'internal' | 'external',
+    cta_internal_url: '/',
+    cta_external_url: '',
+    start_at: '',
+    end_at: '',
+    sort_order: '0',
+    is_active: true
+  });
+  const [uploadingHighlightImage, setUploadingHighlightImage] = useState(false);
+  const sortedHighlights = React.useMemo(
+    () =>
+      [...(Array.isArray(highlights) ? highlights : [])].sort(
+        (a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0)
+      ),
+    [highlights]
+  );
+  const internalRouteOptions = React.useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [{ label: 'Inicio', value: '/' }];
+    const names = Array.from(
+      new Set(
+        (Array.isArray(sharedClassTypes) ? sharedClassTypes : [])
+          .map((row: any) => String(row?.name || '').trim())
+          .filter(Boolean)
+      )
+    );
+    names.forEach((name) => {
+      items.push({
+        label: `Clase: ${name}`,
+        value: `/schedule/${slugifyClassType(name)}`
+      });
+    });
+    return items;
+  }, [sharedClassTypes]);
 
   useEffect(() => {
     setPackages(Array.isArray(sharedPackages) ? sharedPackages : []);
@@ -286,6 +342,8 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
         await Promise.all([
           refreshPackages(),
           refreshClasses(),
+          refreshHighlights(),
+          loadCoachHighlights(),
           loadCommunity(),
           loadWhatsAppTemplates(),
           loadCashCut({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 })
@@ -298,7 +356,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       }
     };
     boot();
-  }, [refreshClasses, refreshPackages]);
+  }, [refreshClasses, refreshPackages, refreshHighlights]);
 
   useEffect(() => {
     if (!community.length || !whatsAppTemplates.length) return;
@@ -368,6 +426,198 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       precio_base: '0',
       estado: 'active'
     });
+  };
+
+  const resetHighlightForm = () => {
+    setHighlightForm({
+      id: '',
+      title: '',
+      subtitle: '',
+      image_url: '',
+      cta_label: '',
+      cta_mode: 'internal',
+      cta_internal_url: '/',
+      cta_external_url: '',
+      start_at: '',
+      end_at: '',
+      sort_order: '0',
+      is_active: true
+    });
+  };
+
+  const mapHighlightToForm = (item: any) => ({
+    ...(String(item?.cta_url || '').trim().startsWith('/')
+      ? { cta_mode: 'internal' as const, cta_internal_url: String(item?.cta_url || '').trim() || '/', cta_external_url: '' }
+      : { cta_mode: 'external' as const, cta_internal_url: '/', cta_external_url: String(item?.cta_url || '').trim() }),
+    id: String(item?.id || ''),
+    title: String(item?.title || ''),
+    subtitle: String(item?.subtitle || ''),
+    image_url: String(item?.image_url || ''),
+    cta_label: String(item?.cta_label || ''),
+    start_at: item?.start_at ? String(item.start_at).slice(0, 16) : '',
+    end_at: item?.end_at ? String(item.end_at).slice(0, 16) : '',
+    sort_order: String(Number(item?.sort_order || 0)),
+    is_active: Number(item?.is_active ?? 1) === 1
+  });
+
+  const loadCoachHighlights = async () => {
+    const rows = await api.coach.getHighlights();
+    setHighlights(Array.isArray(rows) ? rows : []);
+  };
+
+  const handleHighlightImageUpload = async (file: File) => {
+    const isImage = String(file?.type || '').startsWith('image/');
+    if (!isImage) {
+      setError('Selecciona una imagen válida para el highlight.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('La imagen del highlight no puede superar 8 MB.');
+      return;
+    }
+    try {
+      setUploadingHighlightImage(true);
+      setError(null);
+      const uploaded: any = await api.uploadImage(file);
+      const secureUrl = String(uploaded?.secure_url || '').trim();
+      if (!secureUrl) throw new Error('No pudimos obtener la URL de la imagen.');
+      setHighlightForm((prev) => ({ ...prev, image_url: secureUrl }));
+    } catch (err: any) {
+      logger.error('Error uploading highlight image', err);
+      setError(resolveErrorMessage(err, 'No pudimos subir la imagen del highlight.'));
+    } finally {
+      setUploadingHighlightImage(false);
+    }
+  };
+
+  const handleSaveHighlight = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      setError(null);
+      const title = String(highlightForm.title || '').trim();
+      if (!title) throw new Error('El título del highlight es obligatorio.');
+      const startAt = highlightForm.start_at ? new Date(highlightForm.start_at).toISOString() : null;
+      const endAt = highlightForm.end_at ? new Date(highlightForm.end_at).toISOString() : null;
+      if (startAt && endAt && new Date(endAt).getTime() < new Date(startAt).getTime()) {
+        throw new Error('La fecha final no puede ser menor a la fecha inicial.');
+      }
+      const resolvedCtaUrl =
+        highlightForm.cta_mode === 'internal'
+          ? String(highlightForm.cta_internal_url || '').trim()
+          : String(highlightForm.cta_external_url || '').trim();
+      if (highlightForm.cta_mode === 'external' && resolvedCtaUrl) {
+        const isValidExternal = /^https?:\/\//i.test(resolvedCtaUrl);
+        if (!isValidExternal) throw new Error('La URL externa debe iniciar con http:// o https://');
+      }
+      const payload = {
+        title,
+        subtitle: String(highlightForm.subtitle || '').trim() || null,
+        image_url: String(highlightForm.image_url || '').trim() || null,
+        cta_label: String(highlightForm.cta_label || '').trim() || null,
+        cta_url: resolvedCtaUrl || null,
+        start_at: startAt,
+        end_at: endAt,
+        sort_order: highlightForm.id
+          ? normalizeIntegerInput(highlightForm.sort_order, 0, 0)
+          : ((sortedHighlights.length
+              ? Math.max(...sortedHighlights.map((x: any) => Number(x?.sort_order || 0)))
+              : 0) + 1),
+        is_active: highlightForm.is_active ? 1 : 0,
+        actor_id: user.id
+      };
+      if (highlightForm.id) {
+        await api.coach.updateHighlight(highlightForm.id, payload);
+      } else {
+        await api.coach.createHighlight(payload);
+      }
+      await Promise.all([loadCoachHighlights(), refreshHighlights()]);
+      resetHighlightForm();
+    } catch (err: any) {
+      logger.error('Error saving highlight', err);
+      const explicitMessage = String(err?.message || '').trim();
+      setError(explicitMessage || resolveErrorMessage(err, 'No se pudo guardar el highlight.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteHighlight = async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await api.coach.deleteHighlight(id);
+      await Promise.all([loadCoachHighlights(), refreshHighlights()]);
+      if (highlightForm.id === id) resetHighlightForm();
+    } catch (err: any) {
+      logger.error('Error deleting highlight', err);
+      setError(resolveErrorMessage(err, 'No se pudo eliminar el highlight.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleHighlight = async (item: HighlightItem) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await api.coach.toggleHighlight(item.id, {
+        is_active: Number(item.is_active || 0) === 1 ? 0 : 1,
+        actor_id: user.id
+      });
+      await Promise.all([loadCoachHighlights(), refreshHighlights()]);
+    } catch (err: any) {
+      logger.error('Error toggling highlight', err);
+      setError(resolveErrorMessage(err, 'No se pudo actualizar el estado del highlight.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMoveHighlight = async (id: string, direction: 'up' | 'down') => {
+    try {
+      const list = [...sortedHighlights];
+      const index = list.findIndex((x: any) => String(x?.id || '') === id);
+      if (index < 0) return;
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= list.length) return;
+      const current = list[index] as any;
+      const target = list[targetIndex] as any;
+      const currentOrder = Number(current?.sort_order || 0);
+      const targetOrder = Number(target?.sort_order || 0);
+
+      await Promise.all([
+        api.coach.updateHighlight(String(current.id), {
+          title: current.title,
+          subtitle: current.subtitle || null,
+          image_url: current.image_url || null,
+          cta_label: current.cta_label || null,
+          cta_url: current.cta_url || null,
+          start_at: current.start_at || null,
+          end_at: current.end_at || null,
+          sort_order: targetOrder,
+          is_active: Number(current.is_active || 0),
+          actor_id: user.id
+        }),
+        api.coach.updateHighlight(String(target.id), {
+          title: target.title,
+          subtitle: target.subtitle || null,
+          image_url: target.image_url || null,
+          cta_label: target.cta_label || null,
+          cta_url: target.cta_url || null,
+          start_at: target.start_at || null,
+          end_at: target.end_at || null,
+          sort_order: currentOrder,
+          is_active: Number(target.is_active || 0),
+          actor_id: user.id
+        })
+      ]);
+
+      await Promise.all([loadCoachHighlights(), refreshHighlights()]);
+    } catch (err: any) {
+      logger.error('Error moving highlight order', err);
+      setError(resolveErrorMessage(err, 'No se pudo actualizar el orden del highlight.'));
+    }
   };
 
   const handleSavePackage = async (e: React.FormEvent) => {
@@ -798,8 +1048,9 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
       )}
 
       {activeTab === 'creator' && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
             <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">{packageForm.id ? 'Editar paquete' : 'Crear paquete'}</h4>
             <form onSubmit={handleSavePackage} className="space-y-4">
               <div>
@@ -1009,9 +1260,9 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 )}
               </div>
             </form>
-          </div>
+            </div>
 
-          <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
+            <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
             <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Catalogo de paquetes</h4>
             <div className="space-y-3 max-h-[480px] overflow-y-auto">
               {packages.map((pkg) => (
@@ -1044,6 +1295,234 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 </div>
               ))}
               {packages.length === 0 && <p className="text-sm text-zinc-400">Aun no hay paquetes registrados.</p>}
+            </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
+              <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">
+                {highlightForm.id ? 'Editar highlight' : 'Nuevo highlight promocional'}
+              </h4>
+              <form onSubmit={handleSaveHighlight} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Título</label>
+                  <input
+                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                    value={highlightForm.title}
+                    onChange={(e) => setHighlightForm((prev) => ({ ...prev, title: e.target.value }))}
+                    placeholder="Ej. Reto de mayo"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Subtítulo</label>
+                  <textarea
+                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm"
+                    rows={3}
+                    value={highlightForm.subtitle}
+                    onChange={(e) => setHighlightForm((prev) => ({ ...prev, subtitle: e.target.value }))}
+                    placeholder="Texto breve para explicar la promoción."
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">CTA label</label>
+                    <input
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.cta_label}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, cta_label: e.target.value }))}
+                      placeholder="Ej. Reservar ahora"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Tipo de CTA</label>
+                    <select
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.cta_mode}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, cta_mode: e.target.value as 'internal' | 'external' }))}
+                    >
+                      <option value="internal">Interno (app)</option>
+                      <option value="external">Externo (URL)</option>
+                    </select>
+                  </div>
+                </div>
+                {highlightForm.cta_mode === 'internal' ? (
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Ruta interna</label>
+                    <select
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.cta_internal_url}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, cta_internal_url: e.target.value }))}
+                    >
+                      {internalRouteOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">URL externa</label>
+                    <input
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.cta_external_url}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, cta_external_url: e.target.value }))}
+                      placeholder="https://..."
+                    />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Vigencia inicio</label>
+                    <input
+                      type="datetime-local"
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.start_at}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, start_at: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Vigencia fin</label>
+                    <input
+                      type="datetime-local"
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={highlightForm.end_at}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, end_at: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Orden</label>
+                    <div className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px] bg-zinc-50 text-zinc-600">
+                      {highlightForm.id
+                        ? `Posición actual: #${sortedHighlights.findIndex((x: any) => x.id === highlightForm.id) + 1 || 1}`
+                        : 'Se ubicará al final. Luego puedes moverlo con Subir/Bajar.'}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-xs text-zinc-700 min-h-[44px]">
+                    <input
+                      type="checkbox"
+                      checked={highlightForm.is_active}
+                      onChange={(e) => setHighlightForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                    />
+                    <span className="font-semibold">Activo</span>
+                  </label>
+                </div>
+                <label className="flex items-center justify-between gap-3 border border-zinc-200 rounded-xl px-3 py-3 cursor-pointer min-h-[44px]">
+                  <span className="text-xs font-semibold text-zinc-600">
+                    {uploadingHighlightImage ? 'Subiendo imagen...' : highlightForm.image_url ? 'Imagen cargada' : 'Subir imagen'}
+                  </span>
+                  <span className="px-3 py-1 rounded-lg bg-zinc-100 text-[10px] font-black uppercase tracking-widest text-zinc-600">Archivo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={uploadingHighlightImage}
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const inputEl = e.currentTarget;
+                      const file = e.target.files?.[0];
+                      if (file) await handleHighlightImageUpload(file);
+                      inputEl.value = '';
+                    }}
+                  />
+                </label>
+                <div className="flex gap-2">
+                  <button disabled={loading || uploadingHighlightImage} className="px-5 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest min-h-[44px]">
+                    {highlightForm.id ? 'Actualizar highlight' : 'Guardar highlight'}
+                  </button>
+                  {highlightForm.id && (
+                    <button
+                      type="button"
+                      onClick={resetHighlightForm}
+                      className="px-5 py-3 rounded-xl bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px]"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 space-y-4">
+              <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900">Preview y listado de highlights</h4>
+              <div className="border border-zinc-200 rounded-2xl overflow-hidden bg-zinc-900 text-white">
+                {highlightForm.image_url ? (
+                  <img src={highlightForm.image_url} alt={highlightForm.title || 'preview'} className="w-full h-40 object-cover" />
+                ) : (
+                  <div className="w-full h-40 bg-zinc-800 flex items-center justify-center text-zinc-400">
+                    <i className="fas fa-image text-3xl"></i>
+                  </div>
+                )}
+                <div className="p-4 space-y-2">
+                  <p className="text-lg font-black uppercase tracking-tight">{highlightForm.title || 'Título del highlight'}</p>
+                  <p className="text-sm text-zinc-300">{highlightForm.subtitle || 'Subtítulo del highlight.'}</p>
+                  <button type="button" className="px-4 py-2 rounded-xl bg-brand text-white text-[10px] font-black uppercase tracking-widest min-h-[44px]">
+                    {highlightForm.cta_label || 'Call to action'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-[420px] overflow-y-auto">
+                {sortedHighlights.length === 0 && <p className="text-sm text-zinc-400">Aún no hay highlights registrados.</p>}
+                {sortedHighlights.map((item, idx) => (
+                  <div key={item.id} className="border border-zinc-100 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-black text-zinc-900 uppercase tracking-tight">#{idx + 1} · {item.title}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleHighlight(item)}
+                        className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest min-h-[44px] ${
+                          Number(item.is_active || 0) === 1 ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-600'
+                        }`}
+                      >
+                        {Number(item.is_active || 0) === 1 ? 'Activo' : 'Inactivo'}
+                      </button>
+                    </div>
+                    {item.image_url && (
+                      <img src={String(item.image_url)} alt={item.title} className="w-full h-28 object-cover rounded-xl border border-zinc-200" />
+                    )}
+                    <p className="text-xs text-zinc-500">{item.subtitle || 'Sin subtítulo'}</p>
+                    <p className="text-[10px] text-zinc-500">
+                      Orden: {Number(item.sort_order || 0)} | Vigencia: {item.start_at ? new Date(item.start_at).toLocaleDateString('es-MX') : 'Sin inicio'} - {item.end_at ? new Date(item.end_at).toLocaleDateString('es-MX') : 'Sin fin'}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleMoveHighlight(item.id, 'up')}
+                        disabled={idx === 0}
+                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px] disabled:opacity-40"
+                      >
+                        Subir
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMoveHighlight(item.id, 'down')}
+                        disabled={idx === sortedHighlights.length - 1}
+                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px] disabled:opacity-40"
+                      >
+                        Bajar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHighlightForm(mapHighlightToForm(item))}
+                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px]"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHighlight(item.id)}
+                        className="px-3 py-2 rounded-lg bg-rose-50 text-rose-700 text-[10px] font-black uppercase tracking-widest min-h-[44px]"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

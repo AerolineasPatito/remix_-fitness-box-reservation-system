@@ -5,6 +5,7 @@ import { useAppData } from '../contexts/AppDataContext.tsx';
 import { emitStudentStateChanged } from '../lib/studentStateSync.ts';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
 import { slugifyClassType } from '../lib/routeHelpers.ts';
+import { Button, Card, NumberInput, SelectInput, TextInput } from './ui/index.ts';
 
 type CoachBusinessTab = 'creator' | 'community' | 'management' | 'cashcut';
 
@@ -1104,7 +1105,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
   return (
     <div className="space-y-6 sm:space-y-8 overflow-x-hidden [&_button]:min-h-[44px] [&_input]:min-h-[44px] [&_select]:min-h-[44px]">
-      <div className="bg-white border-2 border-zinc-50 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 shadow-xl">
+      <Card className="bg-white border-2 border-zinc-50 rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 shadow-xl">
         <div className="flex flex-col gap-4 sm:gap-6">
           <div>
             <h3 className="text-2xl sm:text-4xl font-bebas text-zinc-900 tracking-tighter uppercase italic">Gestión de Paquetes</h3>
@@ -1112,18 +1113,18 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 bg-zinc-100 p-1 rounded-xl">
-            <button onClick={() => setActiveTab('creator')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'creator' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Creador</button>
-            <button onClick={() => setActiveTab('community')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'community' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Comunidad</button>
-            <button onClick={() => setActiveTab('management')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'management' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Gestión</button>
-            <button onClick={() => setActiveTab('cashcut')} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest ${activeTab === 'cashcut' ? 'bg-white text-brand shadow-sm' : 'text-zinc-500'}`}>Corte de Caja</button>
+            <Button type="button" size="sm" variant={activeTab === 'creator' ? 'primary' : 'ghost'} onClick={() => setActiveTab('creator')} className={activeTab === 'creator' ? '' : 'border-transparent text-zinc-500'}>Creador</Button>
+            <Button type="button" size="sm" variant={activeTab === 'community' ? 'primary' : 'ghost'} onClick={() => setActiveTab('community')} className={activeTab === 'community' ? '' : 'border-transparent text-zinc-500'}>Comunidad</Button>
+            <Button type="button" size="sm" variant={activeTab === 'management' ? 'primary' : 'ghost'} onClick={() => setActiveTab('management')} className={activeTab === 'management' ? '' : 'border-transparent text-zinc-500'}>Gestion</Button>
+            <Button type="button" size="sm" variant={activeTab === 'cashcut' ? 'primary' : 'ghost'} onClick={() => setActiveTab('cashcut')} className={activeTab === 'cashcut' ? '' : 'border-transparent text-zinc-500'}>Corte de Caja</Button>
           </div>
         </div>
-      </div>
+      </Card>
 
       {error && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-rose-700 text-sm">
+        <Card className="bg-rose-50 border-rose-200 rounded-xl p-4 text-rose-700 text-sm">
           {error}
-        </div>
+        </Card>
       )}
 
       {activeTab === 'creator' && (
@@ -1133,31 +1134,32 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
             <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">{packageForm.id ? 'Editar paquete' : 'Crear paquete'}</h4>
             <form onSubmit={handleSavePackage} className="space-y-4">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Nombre del Paquete</label>
-                <input className="w-full border border-zinc-200 rounded-xl p-3 text-sm" placeholder="Ej. FOCUS WORK" value={packageForm.nombre} onChange={(e) => setPackageForm((prev) => ({ ...prev, nombre: e.target.value }))} required />
+                <TextInput
+                  label="Nombre del Paquete"
+                  placeholder="Ej. FOCUS WORK"
+                  value={packageForm.nombre}
+                  onChange={(e) => setPackageForm((prev) => ({ ...prev, nombre: e.target.value }))}
+                  required
+                />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Capacidad</label>
-                  <select
-                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                  <SelectInput
+                    label="Capacidad"
                     value={packageForm.capacidad}
                     onChange={(e) => setPackageForm((prev) => ({ ...prev, capacidad: e.target.value }))}
-                  >
-                    <option value="1">1 persona</option>
-                    <option value="2">2 personas</option>
-                    <option value="3">3 personas</option>
-                  </select>
+                    options={[
+                      { value: '1', label: '1 persona' },
+                      { value: '2', label: '2 personas' },
+                      { value: '3', label: '3 personas' }
+                    ]}
+                  />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Numero de Clases</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
+                  <NumberInput
+                    label="Numero de Clases"
                     step={1}
                     min={1}
-                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
                     placeholder="Ej. 12"
                     value={packageForm.numero_clases}
                     onChange={(e) => setPackageForm((prev) => ({ ...prev, numero_clases: e.target.value }))}
@@ -1169,14 +1171,10 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Vigencia</label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
+                  <NumberInput
+                    label="Vigencia"
                     step={1}
                     min={1}
-                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
                     placeholder="Ej. 4 semanas"
                     value={packageForm.vigencia_semanas}
                     onChange={(e) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: e.target.value }))}
@@ -1189,14 +1187,11 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Precio Base</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  pattern="[0-9]*[.]?[0-9]*"
+                <NumberInput
+                  label="Precio Base"
                   min={0}
-                  step="0.01"
-                  className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                  allowDecimal
+                  step={0.01}
                   placeholder="Precio Base"
                   value={packageForm.precio_base}
                   onChange={(e) => setPackageForm((prev) => ({ ...prev, precio_base: e.target.value }))}
@@ -1212,18 +1207,23 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Detalles y Politicas</label>
             <textarea className="w-full border border-zinc-200 rounded-xl p-3 text-sm" rows={4} placeholder="Detalles/Políticas: condiciones, reposiciones, cancelaciones..." value={packageForm.detalles} onChange={(e) => setPackageForm((prev) => ({ ...prev, detalles: e.target.value }))} />
               </div>
-              <select className="w-full border border-zinc-200 rounded-xl p-3 text-sm" value={packageForm.estado} onChange={(e) => setPackageForm((prev) => ({ ...prev, estado: e.target.value }))}>
-                <option value="active">Activo</option>
-                <option value="inactive">Inactivo</option>
-              </select>
+              <SelectInput
+                label="Estado"
+                value={packageForm.estado}
+                onChange={(e) => setPackageForm((prev) => ({ ...prev, estado: e.target.value }))}
+                options={[
+                  { value: 'active', label: 'Activo' },
+                  { value: 'inactive', label: 'Inactivo' }
+                ]}
+              />
               <div className="flex gap-3">
-                <button disabled={loading} className="flex-1 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">
+                <Button type="submit" variant="primary" fullWidth loading={loading} className="text-[10px]">
                   {packageForm.id ? 'Actualizar' : 'Guardar'}
-                </button>
+                </Button>
                 {packageForm.id && (
-                  <button type="button" onClick={resetPackageForm} className="px-4 py-3 rounded-xl bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest">
+                  <Button type="button" onClick={resetPackageForm} variant="secondary" className="px-4 text-[10px]">
                     Limpiar
-                  </button>
+                  </Button>
                 )}
               </div>
             </form>
@@ -1241,8 +1241,10 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                       <p className="text-[11px] text-brand font-black">{money(Number(pkg.precio_base || 0))}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button
+                      <Button
                         type="button"
+                        size="sm"
+                        variant="secondary"
                         onClick={() =>
                           setPackageForm({
                             ...pkg,
@@ -1252,11 +1254,11 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                             precio_base: String(Number(pkg.precio_base || 0))
                           })
                         }
-                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                        className="px-3 text-[10px]"
                       >
                         Editar
-                      </button>
-                      <button type="button" onClick={() => handleDeletePackage(pkg.id)} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-widest">Baja</button>
+                      </Button>
+                      <Button type="button" size="sm" variant="danger" onClick={() => handleDeletePackage(pkg.id)} className="px-3 text-[10px]">Baja</Button>
                     </div>
                   </div>
                 </div>

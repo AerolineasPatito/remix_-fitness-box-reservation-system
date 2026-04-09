@@ -7,6 +7,7 @@ import { CoachBusinessPanel } from './CoachBusinessPanel.tsx';
 import { ClassCalendar } from './ClassCalendar.tsx';
 import { useAppData } from '../contexts/AppDataContext.tsx';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Button, Card } from './ui/index.ts';
 
 interface CoachPanelProps {
   user: Profile;
@@ -890,54 +891,66 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
             {/* Mobile Tab Selector - Mejorado */}
             <div className="lg:hidden">
               <div className="grid grid-cols-4 gap-2 bg-zinc-100 p-1 rounded-xl">
-                <button 
+                <Button
+                  type="button"
+                  size="sm"
                   onClick={() => setActiveTab('sessions')} 
-                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                  variant={activeTab === 'sessions' ? 'primary' : 'ghost'}
+                  className={`px-2 sm:px-3 ${
                     activeTab === 'sessions' 
-                      ? 'bg-white text-brand shadow-sm' 
-                      : 'text-zinc-500 hover:text-zinc-700'
+                      ? 'shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 border-transparent'
                   }`}
                 >
                   Cartelera
-                </button>
-                <button 
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   onClick={() => setActiveTab('students')} 
-                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                  variant={activeTab === 'students' ? 'primary' : 'ghost'}
+                  className={`px-2 sm:px-3 ${
                     activeTab === 'students' 
-                      ? 'bg-zinc-900 text-white shadow-sm' 
-                      : 'text-zinc-500 hover:text-zinc-700'
+                      ? 'shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 border-transparent'
                   }`}
                 >
                   Comunidad
-                </button>
-                <button 
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   onClick={() => setActiveTab('analytics')} 
-                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                  variant={activeTab === 'analytics' ? 'primary' : 'ghost'}
+                  className={`px-2 sm:px-3 ${
                     activeTab === 'analytics' 
-                      ? 'bg-purple-600 text-white shadow-sm' 
-                      : 'text-zinc-500 hover:text-zinc-700'
+                      ? 'shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 border-transparent'
                   }`}
                 >
                   Datos
-                </button>
-                <button 
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   onClick={() => setActiveTab('business')} 
-                  className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                  variant={activeTab === 'business' ? 'primary' : 'ghost'}
+                  className={`px-2 sm:px-3 ${
                     activeTab === 'business' 
-                      ? 'bg-brand text-white shadow-sm' 
-                      : 'text-zinc-500 hover:text-zinc-700'
+                      ? 'shadow-sm' 
+                      : 'text-zinc-500 hover:text-zinc-700 border-transparent'
                   }`}
                 >
                   Negocio
-                </button>
+                </Button>
               </div>
             </div>
             {/* Desktop Tab Navigation */}
             <div className="hidden lg:flex bg-white p-2 rounded-[2rem] border border-zinc-200 shadow-sm">
-              <button onClick={() => setActiveTab('sessions')} className={`px-6 sm:px-8 lg:px-12 py-3 lg:py-4 rounded-xl lg:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sessions' ? 'bg-white text-brand shadow-xl' : 'text-zinc-400 hover:text-zinc-600'}`}>Cartelera</button>
-              <button onClick={() => setActiveTab('students')} className={`px-6 sm:px-8 lg:px-12 py-3 lg:py-4 rounded-xl lg:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'students' ? 'bg-zinc-900 text-white shadow-xl' : 'text-zinc-400 hover:text-zinc-600'}`}>Comunidad</button>
-              <button onClick={() => setActiveTab('analytics')} className={`px-6 sm:px-8 lg:px-12 py-3 lg:py-4 rounded-xl lg:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'analytics' ? 'bg-purple-600 text-white shadow-xl' : 'text-zinc-400 hover:text-zinc-600'}`}>Analiticas</button>
-              <button onClick={() => setActiveTab('business')} className={`px-6 sm:px-8 lg:px-12 py-3 lg:py-4 rounded-xl lg:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'business' ? 'bg-brand text-white shadow-xl' : 'text-zinc-400 hover:text-zinc-600'}`}>Negocio</button>
+              <Button type="button" size="sm" variant={activeTab === 'sessions' ? 'primary' : 'ghost'} onClick={() => setActiveTab('sessions')} className={`px-6 sm:px-8 lg:px-10 ${activeTab === 'sessions' ? 'shadow-xl' : 'border-transparent text-zinc-500'}`}>Cartelera</Button>
+              <Button type="button" size="sm" variant={activeTab === 'students' ? 'primary' : 'ghost'} onClick={() => setActiveTab('students')} className={`px-6 sm:px-8 lg:px-10 ${activeTab === 'students' ? 'shadow-xl' : 'border-transparent text-zinc-500'}`}>Comunidad</Button>
+              <Button type="button" size="sm" variant={activeTab === 'analytics' ? 'primary' : 'ghost'} onClick={() => setActiveTab('analytics')} className={`px-6 sm:px-8 lg:px-10 ${activeTab === 'analytics' ? 'shadow-xl' : 'border-transparent text-zinc-500'}`}>Analiticas</Button>
+              <Button type="button" size="sm" variant={activeTab === 'business' ? 'primary' : 'ghost'} onClick={() => setActiveTab('business')} className={`px-6 sm:px-8 lg:px-10 ${activeTab === 'business' ? 'shadow-xl' : 'border-transparent text-zinc-500'}`}>Negocio</Button>
             </div>
           </div>
         </div>
@@ -949,17 +962,17 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         {deletingId && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
             <div className="absolute inset-0 bg-zinc-900/90 backdrop-blur-md" onClick={() => setDeletingId(null)}></div>
-            <div className="relative bg-white w-full max-w-md sm:max-w-xl rounded-[2rem] sm:rounded-[3rem] overflow-hidden shadow-2xl animate-in zoom-in">
+            <Card className="relative w-full max-w-md sm:max-w-xl rounded-[2rem] sm:rounded-[3rem] overflow-hidden shadow-2xl animate-in zoom-in p-0">
               <div className="bg-amber-500 p-6 sm:p-10 text-white flex flex-col items-center text-center">
                 <i className="fas fa-exclamation-triangle text-3xl sm:text-4xl mb-4 sm:mb-6"></i>
                 <h3 className="text-2xl sm:text-4xl font-bebas tracking-wide uppercase italic">¿Cancelar Clase?</h3>
                 <p className="mt-2 text-sm opacity-90">La clase se marcará como cancelada</p>
               </div>
               <div className="p-6 sm:p-12 flex space-x-3 sm:space-x-4">
-                <button onClick={() => setDeletingId(null)} className="flex-1 py-4 sm:py-5 bg-zinc-100 text-zinc-400 font-black rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] uppercase tracking-widest">No, Volver</button>
-                <button onClick={handleCancelClass} className="flex-1 py-4 sm:py-5 bg-amber-600 text-white font-black rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] uppercase tracking-widest shadow-xl shadow-amber-200">Sí, Cancelar</button>
+                <Button onClick={() => setDeletingId(null)} variant="secondary" fullWidth className="sm:min-h-[52px]">No, Volver</Button>
+                <Button onClick={handleCancelClass} variant="danger" fullWidth className="sm:min-h-[52px]">Si, Cancelar</Button>
               </div>
-            </div>
+            </Card>
           </div>
         )}
 
@@ -1769,18 +1782,20 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   {availableYears.map((year) => (
-                    <button
+                    <Button
                       key={year}
                       type="button"
+                      size="sm"
                       onClick={() => setSelectedYear(year)}
-                      className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                      variant={selectedYear === year ? 'primary' : 'ghost'}
+                      className={`px-3 ${
                         selectedYear === year
-                          ? 'bg-zinc-900 text-white'
-                          : 'bg-zinc-100 text-zinc-500 hover:text-zinc-700'
+                          ? ''
+                          : 'border-transparent text-zinc-500 hover:text-zinc-700'
                       }`}
                     >
                       {year}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -1846,22 +1861,26 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                     </p>
                     <div className="flex gap-2">
                       {activeClassesVisibleCount < yearInstances.length && (
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
+                          variant="secondary"
                           onClick={() => setActiveClassesVisibleCount((prev) => Math.min(prev + ACTIVE_CLASSES_LIST_STEP, yearInstances.length))}
-                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                          className="px-3 text-zinc-700"
                         >
                           Ver mas
-                        </button>
+                        </Button>
                       )}
                       {activeClassesVisibleCount > ACTIVE_CLASSES_LIST_STEP && (
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
+                          variant="ghost"
                           onClick={() => setActiveClassesVisibleCount(ACTIVE_CLASSES_LIST_STEP)}
-                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-600"
+                          className="px-3 text-zinc-600"
                         >
                           Ver menos
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -1938,20 +1957,26 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         </div>
                         
                         <div className="flex space-x-2">
-                          <button 
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 1)} 
-                            className="flex-1 py-2.5 bg-white border border-zinc-200 rounded-lg text-[8px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50"
+                            className="flex-1 text-[8px] disabled:opacity-50"
                           >
                             {updatingStudentId === `${student.id}_1` ? <i className="fas fa-circle-notch fa-spin"></i> : '+1 Crédito'}
-                          </button>
-                          <button 
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="primary"
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 10)} 
-                            className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50"
+                            className="flex-1 text-[8px] disabled:opacity-50"
                           >
                             {updatingStudentId === `${student.id}_10` ? <i className="fas fa-circle-notch fa-spin"></i> : '+10 Pack'}
-                          </button>
+                          </Button>
                         </div>
                       </div>
                       
@@ -1975,20 +2000,26 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                           <p className="text-[8px] font-black text-zinc-300 uppercase tracking-widest mt-1">Asistencias</p>
                         </div>
                         <div className="col-span-2 lg:col-span-3 flex justify-end space-x-2">
-                          <button 
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 1)} 
-                            className="px-3 py-2.5 bg-white border border-zinc-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50 min-w-[56px]"
+                            className="px-3 text-[9px] disabled:opacity-50 min-w-[56px]"
                           >
                             {updatingStudentId === `${student.id}_1` ? <i className="fas fa-circle-notch fa-spin"></i> : '+1'}
-                          </button>
-                          <button 
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="primary"
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 10)} 
-                            className="px-3 py-2.5 bg-zinc-900 text-white rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50 min-w-[92px]"
+                            className="px-3 text-[9px] disabled:opacity-50 min-w-[92px]"
                           >
                             {updatingStudentId === `${student.id}_10` ? <i className="fas fa-circle-notch fa-spin"></i> : '+10 Pack'}
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -2000,22 +2031,26 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       </p>
                       <div className="flex gap-2">
                         {studentsVisibleCount < students.length && (
-                          <button
+                          <Button
                             type="button"
+                            size="sm"
+                            variant="secondary"
                             onClick={() => setStudentsVisibleCount((prev) => Math.min(prev + STUDENTS_LIST_STEP, students.length))}
-                            className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                            className="px-3 text-zinc-700"
                           >
                             Ver mas
-                          </button>
+                          </Button>
                         )}
                         {studentsVisibleCount > STUDENTS_LIST_STEP && (
-                          <button
+                          <Button
                             type="button"
+                            size="sm"
+                            variant="ghost"
                             onClick={() => setStudentsVisibleCount(STUDENTS_LIST_STEP)}
-                            className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-600"
+                            className="px-3 text-zinc-600 border-transparent"
                           >
                             Ver menos
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </div>

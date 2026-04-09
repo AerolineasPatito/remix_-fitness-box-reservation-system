@@ -120,11 +120,19 @@ export const DjangoAdmin: React.FC = () => {
     e.preventDefault();
     try {
       if (currentModel === 'profiles') {
-        if (isAdding) await api.admin.createProfile(editingItem);
-        else await api.admin.updateProfile(editingItem.id, editingItem);
+        const profilePayload = {
+          ...editingItem,
+          credits_remaining: Number.parseInt(String(editingItem?.credits_remaining ?? '0'), 10) || 0
+        };
+        if (isAdding) await api.admin.createProfile(profilePayload);
+        else await api.admin.updateProfile(editingItem.id, profilePayload);
       } else if (currentModel === 'classes') {
-        if (isAdding) await api.addClass(editingItem);
-        else await api.admin.updateClass(editingItem.id, editingItem);
+        const classPayload = {
+          ...editingItem,
+          capacity: Number.parseInt(String(editingItem?.capacity ?? '8'), 10) || 8
+        };
+        if (isAdding) await api.addClass(classPayload);
+        else await api.admin.updateClass(editingItem.id, classPayload);
       }
       setEditingItem(null);
       setIsAdding(false);
@@ -352,7 +360,7 @@ export const DjangoAdmin: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Créditos</label>
-                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={editingItem.credits_remaining} onChange={(e) => setEditingItem({ ...editingItem, credits_remaining: parseInt(e.target.value || '0', 10) })} />
+                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={String(editingItem?.credits_remaining ?? '')} onChange={(e) => setEditingItem({ ...editingItem, credits_remaining: e.target.value })} />
                       </div>
                     </>
                   )}
@@ -377,7 +385,7 @@ export const DjangoAdmin: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-[#666] uppercase mb-1">Capacidad</label>
-                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={editingItem?.capacity || 8} onChange={(e) => setEditingItem({ ...editingItem, capacity: parseInt(e.target.value || '8', 10) })} />
+                        <input type="number" inputMode="numeric" pattern="[0-9]*" step={1} className="w-full border p-2 text-sm min-h-[44px]" value={String(editingItem?.capacity ?? '')} onChange={(e) => setEditingItem({ ...editingItem, capacity: e.target.value })} />
                       </div>
                     </>
                   )}
@@ -396,8 +404,8 @@ export const DjangoAdmin: React.FC = () => {
                     <button
                       onClick={() => {
                         setIsAdding(true);
-                        if (currentModel === 'classes') setEditingItem({ type: 'Entrenamiento Funcional', capacity: 8 });
-                        else setEditingItem({ role: 'student', credits_remaining: 0 });
+                        if (currentModel === 'classes') setEditingItem({ type: 'Entrenamiento Funcional', capacity: '8' });
+                        else setEditingItem({ role: 'student', credits_remaining: '0' });
                       }}
                       className="bg-[#417690] text-white px-4 py-2 text-xs font-bold uppercase rounded hover:bg-[#2b5063]"
                     >
@@ -468,7 +476,20 @@ export const DjangoAdmin: React.FC = () => {
                         )}
                         <td className="p-3 space-x-2">
                           {(currentModel === 'profiles' || currentModel === 'classes') && (
-                            <button onClick={() => setEditingItem(item)} className="text-blue-600 hover:underline">Editar</button>
+                            <button
+                              onClick={() =>
+                                setEditingItem(
+                                  currentModel === 'profiles'
+                                    ? { ...item, credits_remaining: String(item?.credits_remaining ?? '0') }
+                                    : currentModel === 'classes'
+                                      ? { ...item, capacity: String(item?.capacity ?? '8') }
+                                      : item
+                                )
+                              }
+                              className="text-blue-600 hover:underline"
+                            >
+                              Editar
+                            </button>
                           )}
                           {currentModel === 'profiles' && (
                             <>

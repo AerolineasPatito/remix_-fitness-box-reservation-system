@@ -55,6 +55,10 @@ const MESSAGE_HINTS: Array<{ test: (value: string) => boolean; message: string }
     message: 'Ocurrió un problema al procesar la información. Intenta de nuevo.'
   },
   {
+    test: (value) => value.includes('no encontramos al alumno para ajustar creditos'),
+    message: 'No encontramos al atleta seleccionado. Actualiza la lista e intenta de nuevo.'
+  },
+  {
     test: (value) => value.includes('cannot read properties') || value.includes('undefined'),
     message: 'Algo salió mal. Recarga la página e intenta de nuevo.'
   }
@@ -121,4 +125,3 @@ export const toFriendlyError = (input: any, context: FriendlyContext = {}): Frie
 
 export const getFriendlyErrorMessage = (input: any, fallback?: string) =>
   toFriendlyError(input, { fallback }).message;
-

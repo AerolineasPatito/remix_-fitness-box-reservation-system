@@ -60,6 +60,28 @@ const getColorSwatchClass = (theme?: string) => {
 };
 
 export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availability, onRefresh, onRefreshStudents }) => {
+  const normalizeIntegerInput = (raw: string, fallback: number, min = 1, max?: number) => {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    if (parsed < min) return min;
+    if (typeof max === 'number' && parsed > max) return max;
+    return parsed;
+  };
+  const bumpIntegerInput = (
+    value: string,
+    fallback: number,
+    delta: number,
+    setValue: (next: string) => void,
+    min = 1,
+    max?: number
+  ) => {
+    const base = normalizeIntegerInput(value, fallback, min, max);
+    let next = base + delta;
+    if (next < min) next = min;
+    if (typeof max === 'number' && next > max) next = max;
+    setValue(String(next));
+  };
+
   const { addNotification, removeNotification } = useNotifications();
   const { classTypes: sharedClassTypes, classTypesLoading, refreshClassTypes, refreshAvailability, refreshClasses } = useAppData();
   const [activeTab, setActiveTab] = useState<'sessions' | 'students' | 'analytics' | 'business'>('sessions');
@@ -106,6 +128,13 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     weeks: 4,
     daysOfWeek: [] as number[]
   });
+  const [classTypeDurationInput, setClassTypeDurationInput] = useState('60');
+  const [minCapacityInput, setMinCapacityInput] = useState('1');
+  const [maxCapacityInput, setMaxCapacityInput] = useState('8');
+  const [weeksInput, setWeeksInput] = useState('4');
+  const [classTypeDurationDrafts, setClassTypeDurationDrafts] = useState<Record<string, string>>({});
+  const [uploadingClassTypeImage, setUploadingClassTypeImage] = useState(false);
+  const [uploadingClassTypeRowId, setUploadingClassTypeRowId] = useState<string | null>(null);
 
   const normalizeInstances = (data: any[]): ClassInstance[] =>
     (Array.isArray(data) ? data : []).map((d: any) => ({
@@ -128,7 +157,55 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   useEffect(() => {
     const safeRows = Array.isArray(sharedClassTypes) ? sharedClassTypes : [];
     setClassTypes(safeRows as any[]);
+    setClassTypeDurationDrafts({});
   }, [sharedClassTypes]);
+
+  useEffect(() => {
+    setClassTypeDurationInput(String(classTypeForm.duration || 60));
+  }, [classTypeForm.duration]);
+
+  useEffect(() => {
+    setMinCapacityInput(String(formData.minCapacity || 1));
+  }, [formData.minCapacity]);
+
+  useEffect(() => {
+    setMaxCapacityInput(String(formData.maxCapacity || 8));
+  }, [formData.maxCapacity]);
+
+  useEffect(() => {
+    setWeeksInput(String(recurrenceConfig.weeks || 4));
+  }, [recurrenceConfig.weeks]);
+
+  const classTypeImageById = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(classTypes) ? classTypes : []).forEach((row: any) => {
+      const id = String(row?.id || '').trim();
+      const image = String(row?.image_url || '').trim();
+      if (id && image) map.set(id, image);
+    });
+    return map;
+  }, [classTypes]);
+
+  const classTypeImageByName = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(classTypes) ? classTypes : []).forEach((row: any) => {
+      const name = String(row?.name || '').trim().toLowerCase();
+      const image = String(row?.image_url || '').trim();
+      if (name && image) map.set(name, image);
+    });
+    return map;
+  }, [classTypes]);
+
+  const getLiveClassImage = (inst: any) => {
+    const classTypeId = String(inst?.class_type_id || inst?.classTypeId || '').trim();
+    const classTypeName = String(inst?.type || '').trim().toLowerCase();
+    return (
+      (classTypeId ? classTypeImageById.get(classTypeId) : '') ||
+      (classTypeName ? classTypeImageByName.get(classTypeName) : '') ||
+      String(inst?.imageUrl || '').trim() ||
+      ''
+    );
+  };
 
   // Validación de horario conflictivo en tiempo real
   const hasScheduleConflict = useMemo(() => {
@@ -229,14 +306,22 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     }
   };
 
-  const refreshCoachViews = async () => {
+  const refreshCoachViews = async (options?: { forceYear?: number }) => {
     await Promise.resolve(onRefresh());
     if (activeTab === 'sessions') {
       await Promise.all([refreshClassTypes(), refreshClasses(), refreshAvailability()]);
-      if (selectedYear) {
-        await loadYearClasses(selectedYear);
-        await loadYearCalendarClasses(selectedYear);
-      }
+      const fallbackYear = new Date().getFullYear();
+      const yearToLoad = options?.forceYear || selectedYear || fallbackYear;
+
+      setAvailableYears((prev) => {
+        const next = Array.from(new Set([...(Array.isArray(prev) ? prev : []), yearToLoad]));
+        next.sort((a, b) => b - a);
+        return next;
+      });
+      setSelectedYear((prev) => prev ?? yearToLoad);
+
+      await loadYearClasses(yearToLoad);
+      await loadYearCalendarClasses(yearToLoad);
     }
     if (activeTab === 'students') {
       await Promise.resolve(onRefreshStudents());
@@ -341,20 +426,96 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     }
   };
 
+  const validateImageFile = (file: File) => {
+    if (!String(file.type || '').startsWith('image/')) {
+      addNotification({
+        type: 'warning',
+        title: 'Archivo inválido',
+        message: 'Selecciona una imagen válida (JPG, PNG, WEBP, etc.).',
+        duration: 4500
+      });
+      return false;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      addNotification({
+        type: 'warning',
+        title: 'Archivo demasiado grande',
+        message: 'La imagen no puede superar 8 MB.',
+        duration: 4500
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const handleClassTypeImageUpload = async (file: File) => {
+    if (!validateImageFile(file)) return;
+    setUploadingClassTypeImage(true);
+    try {
+      const uploaded: any = await api.uploadImage(file);
+      const secureUrl = String(uploaded?.secure_url || '').trim();
+      if (!secureUrl) throw new Error('No pudimos obtener la URL segura de la imagen.');
+      setClassTypeForm((prev) => ({ ...prev, image_url: secureUrl }));
+      addNotification({
+        type: 'success',
+        title: 'Imagen cargada',
+        message: 'La imagen se subió correctamente.',
+        duration: 2500
+      });
+    } catch (err: any) {
+      addNotification({
+        type: 'error',
+        title: 'Error al subir imagen',
+        message: getFriendlyErrorMessage(err, 'No pudimos subir la imagen. Intenta de nuevo.'),
+        duration: 6000
+      });
+    } finally {
+      setUploadingClassTypeImage(false);
+    }
+  };
+
+  const handleClassTypeRowImageUpload = async (classTypeId: string, file: File) => {
+    if (!validateImageFile(file)) return;
+    setUploadingClassTypeRowId(classTypeId);
+    try {
+      const uploaded: any = await api.uploadImage(file);
+      const secureUrl = String(uploaded?.secure_url || '').trim();
+      if (!secureUrl) throw new Error('No pudimos obtener la URL segura de la imagen.');
+      setClassTypes((prev) => prev.map((x) => (x.id === classTypeId ? { ...x, image_url: secureUrl } : x)));
+      addNotification({
+        type: 'success',
+        title: 'Imagen cargada',
+        message: 'La imagen se subió correctamente.',
+        duration: 2500
+      });
+    } catch (err: any) {
+      addNotification({
+        type: 'error',
+        title: 'Error al subir imagen',
+        message: getFriendlyErrorMessage(err, 'No pudimos subir la imagen. Intenta de nuevo.'),
+        duration: 6000
+      });
+    } finally {
+      setUploadingClassTypeRowId(null);
+    }
+  };
+
   const handleCreateClassType = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!classTypeForm.name.trim()) return;
     try {
+      const normalizedDuration = normalizeIntegerInput(classTypeDurationInput, Number(classTypeForm.duration || 60), 15);
       await api.createClassType({
         name: classTypeForm.name.trim(),
         image_url: classTypeForm.image_url.trim() || null,
         icon: classTypeForm.icon.trim() || null,
         color_theme: classTypeForm.color_theme.trim() || null,
         description: classTypeForm.description.trim() || null,
-        duration: Number(classTypeForm.duration || 60)
+        duration: normalizedDuration
       });
       setClassTypeForm({ name: '', image_url: '', icon: 'fa-dumbbell', color_theme: 'brand', description: '', duration: 60 });
-      await refreshClassTypes();
+      setClassTypeDurationInput('60');
+      await Promise.all([refreshClassTypes(), refreshClasses()]);
     } catch (err: any) {
       logger.error('Error creating class type', err);
     }
@@ -364,9 +525,18 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     const row = classTypes.find((t) => t.id === id);
     if (!row) return;
     try {
-      await api.updateClassType(id, row);
+      const durationDraft = classTypeDurationDrafts[id];
+      const normalizedDuration = normalizeIntegerInput(durationDraft ?? String(row.duration || 60), Number(row.duration || 60), 15);
+      const payload = { ...row, duration: normalizedDuration };
+      await api.updateClassType(id, payload);
+      setClassTypes((prev) => prev.map((x) => (x.id === id ? { ...x, duration: normalizedDuration } : x)));
+      setClassTypeDurationDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setEditingClassTypeId(null);
-      await refreshClassTypes();
+      await Promise.all([refreshClassTypes(), refreshClasses()]);
     } catch (err: any) {
       logger.error('Error updating class type', err);
     }
@@ -378,7 +548,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       if (formData.classTypeId === id) {
         setFormData((prev) => ({ ...prev, classTypeId: '' }));
       }
-      await refreshClassTypes();
+      await Promise.all([refreshClassTypes(), refreshClasses()]);
     } catch (err: any) {
       logger.error('Error deleting class type', err);
     }
@@ -386,8 +556,25 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
   const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedMinCapacity = normalizeIntegerInput(minCapacityInput, Number(formData.minCapacity || 1), 1);
+    const normalizedMaxCapacity = normalizeIntegerInput(maxCapacityInput, Number(formData.maxCapacity || 8), normalizedMinCapacity);
+    const normalizedWeeks = normalizeIntegerInput(weeksInput, Number(recurrenceConfig.weeks || 4), 1, 24);
 
-    if (Number(formData.minCapacity) < 1 || Number(formData.maxCapacity) < 1 || Number(formData.minCapacity) > Number(formData.maxCapacity)) {
+    if (
+      normalizedMinCapacity !== Number(formData.minCapacity) ||
+      normalizedMaxCapacity !== Number(formData.maxCapacity)
+    ) {
+      setFormData((prev) => ({
+        ...prev,
+        minCapacity: normalizedMinCapacity,
+        maxCapacity: normalizedMaxCapacity
+      }));
+    }
+    if (normalizedWeeks !== Number(recurrenceConfig.weeks)) {
+      setRecurrenceConfig((prev) => ({ ...prev, weeks: normalizedWeeks }));
+    }
+
+    if (normalizedMinCapacity < 1 || normalizedMaxCapacity < 1 || normalizedMinCapacity > normalizedMaxCapacity) {
       addNotification({
         type: 'warning',
         title: 'Capacidades inválidas',
@@ -445,8 +632,8 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         clase: formData.type,
         fecha: classDate,
         horario: `${classTime} (${formData.startTime} - ${formData.endTime})`,
-        minimo_de_alumnos: formData.minCapacity,
-        maximo_de_alumnos: formData.maxCapacity,
+        minimo_de_alumnos: normalizedMinCapacity,
+        maximo_de_alumnos: normalizedMaxCapacity,
         tipo_de_recurrencia: recurrenceConfig.enabled
           ? (recurrenceConfig.recurrenceType === 'daily'
               ? 'Diaria'
@@ -454,7 +641,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 ? 'Semanal'
                 : 'Personalizada')
           : '',
-        duracion_de_la_programacion_semanas: recurrenceConfig.enabled ? recurrenceConfig.weeks : '',
+        duracion_de_la_programacion_semanas: recurrenceConfig.enabled ? normalizedWeeks : '',
         dias_de_repeticion: recurrenceConfig.enabled
           ? (recurrenceConfig.recurrenceType === 'daily'
               ? 'Todos los días'
@@ -501,6 +688,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
   const createClass = async () => {
     setLoading(true);
+    const normalizedMinCapacity = normalizeIntegerInput(minCapacityInput, Number(formData.minCapacity || 1), 1);
+    const normalizedMaxCapacity = normalizeIntegerInput(maxCapacityInput, Number(formData.maxCapacity || 8), normalizedMinCapacity);
+    const normalizedWeeks = normalizeIntegerInput(weeksInput, Number(recurrenceConfig.weeks || 4), 1, 24);
 
     try {
       if (recurrenceConfig.enabled) {
@@ -509,11 +699,11 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           start_date: formData.date,
           start_time: formData.startTime,
           end_time: formData.endTime,
-          min_capacity: Number(formData.minCapacity),
-          max_capacity: Number(formData.maxCapacity),
+          min_capacity: normalizedMinCapacity,
+          max_capacity: normalizedMaxCapacity,
           created_by: user.id,
           recurrence_type: recurrenceConfig.recurrenceType,
-          weeks: Number(recurrenceConfig.weeks),
+          weeks: normalizedWeeks,
           days_of_week: recurrenceConfig.recurrenceType === 'custom'
             ? recurrenceConfig.daysOfWeek
             : recurrenceConfig.recurrenceType === 'weekly'
@@ -527,9 +717,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
           date: formData.date,
           start_time: formData.startTime,
           end_time: formData.endTime,
-          min_capacity: Number(formData.minCapacity),
-          max_capacity: Number(formData.maxCapacity),
-          capacity: Number(formData.maxCapacity),
+          min_capacity: normalizedMinCapacity,
+          max_capacity: normalizedMaxCapacity,
+          capacity: normalizedMaxCapacity,
           created_by: user.id
         });
       }
@@ -550,8 +740,12 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
         weeks: 4,
         daysOfWeek: []
       });
+      setMinCapacityInput('1');
+      setMaxCapacityInput('8');
+      setWeeksInput('4');
       
-      await refreshCoachViews();
+      const createdYear = Number(String(formData.date || '').slice(0, 4)) || new Date().getFullYear();
+      await refreshCoachViews({ forceYear: createdYear });
       
       addNotification({
         type: 'success',
@@ -585,7 +779,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       await api.cancelClass(deletingId, user.id);
       const removedId = deletingId;
       setDeletingId(null);
-      await refreshCoachViews();
+      const canceledClass = yearInstances.find((inst) => inst.id === deletingId) || instances.find((inst) => inst.id === deletingId);
+      const canceledYear = Number(String(canceledClass?.date || '').slice(0, 4)) || selectedYear || new Date().getFullYear();
+      await refreshCoachViews({ forceYear: canceledYear });
       setYearInstances((prev) => prev.filter((inst) => inst.id !== removedId));
       
       addNotification({
@@ -778,13 +974,30 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       placeholder="Nombre del tipo"
                       className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
                     />
-                    <input
-                      type="url"
-                      value={classTypeForm.image_url}
-                      onChange={(e) => setClassTypeForm((prev) => ({ ...prev, image_url: e.target.value }))}
-                      placeholder="URL de imagen"
-                      className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm"
-                    />
+                    <label className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-sm flex items-center justify-between gap-3 cursor-pointer">
+                      <span className="text-zinc-600 font-semibold text-xs sm:text-sm">
+                        {uploadingClassTypeImage
+                          ? 'Subiendo imagen...'
+                          : classTypeForm.image_url
+                            ? 'Imagen seleccionada'
+                            : 'Subir imagen'}
+                      </span>
+                      <span className="px-3 py-1 rounded-lg bg-white border border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-600">
+                        Archivo
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={uploadingClassTypeImage}
+                        onChange={async (e) => {
+                          const inputEl = e.currentTarget;
+                          const file = e.target.files?.[0];
+                          if (file) await handleClassTypeImageUpload(file);
+                          inputEl.value = '';
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
                   </div>
 
                   <div className="space-y-2">
@@ -840,25 +1053,47 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       <div className="w-10 h-10 rounded-lg bg-white border border-zinc-200 text-zinc-500 flex items-center justify-center">
                         <i className="fas fa-clock"></i>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(classTypeDurationInput, Number(classTypeForm.duration || 60), -1, setClassTypeDurationInput, 15)}
+                        className="ml-3 w-11 min-h-[44px] rounded-lg border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Reducir duración"
+                      >
+                        -
+                      </button>
                       <input
                         type="number"
                         min={15}
                         step={1}
                         inputMode="numeric"
                         pattern="[0-9]*"
-                        value={classTypeForm.duration}
-                        onChange={(e) => setClassTypeForm((prev) => ({ ...prev, duration: Number(e.target.value || 60) }))}
-                        className="ml-3 flex-1 bg-white border border-zinc-200 rounded-lg p-2 text-sm font-semibold"
+                        value={classTypeDurationInput}
+                        onChange={(e) => setClassTypeDurationInput(e.target.value)}
+                        onBlur={() => {
+                          const normalized = normalizeIntegerInput(classTypeDurationInput, Number(classTypeForm.duration || 60), 15);
+                          setClassTypeForm((prev) => ({ ...prev, duration: normalized }));
+                          setClassTypeDurationInput(String(normalized));
+                        }}
+                        className="ml-2 flex-1 bg-white border border-zinc-200 rounded-lg p-2 text-sm font-semibold min-h-[44px]"
                       />
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(classTypeDurationInput, Number(classTypeForm.duration || 60), 1, setClassTypeDurationInput, 15)}
+                        className="ml-2 w-11 min-h-[44px] rounded-lg border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Aumentar duración"
+                      >
+                        +
+                      </button>
                       <span className="ml-3 text-xs font-black uppercase tracking-widest text-zinc-500">Minutos</span>
                     </div>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full bg-zinc-900 text-white rounded-xl py-3 text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all"
+                    disabled={uploadingClassTypeImage}
+                    className="w-full bg-zinc-900 text-white rounded-xl py-3 text-[10px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-60"
                   >
-                    Guardar Tipo
+                    {uploadingClassTypeImage ? 'Subiendo Imagen...' : 'Guardar Tipo'}
                   </button>
                 </form>
 
@@ -919,12 +1154,30 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                         <p className="text-[10px] uppercase tracking-widest text-zinc-400">{row.color_theme || 'default'}</p>
                         {editingClassTypeId === row.id && (
                           <div className="mt-2 space-y-3">
-                            <input
-                              value={row.image_url || ''}
-                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, image_url: e.target.value } : x))}
-                              placeholder="URL imagen"
-                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
-                            />
+                            <label className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-2 min-h-[44px] flex items-center justify-between gap-2 cursor-pointer">
+                              <span className="font-semibold text-zinc-600">
+                                {uploadingClassTypeRowId === row.id
+                                  ? 'Subiendo imagen...'
+                                  : row.image_url
+                                    ? 'Imagen cargada'
+                                    : 'Subir imagen'}
+                              </span>
+                              <span className="px-2 py-1 rounded bg-white border border-zinc-200 text-[9px] font-black uppercase tracking-widest text-zinc-600">
+                                Archivo
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={uploadingClassTypeRowId === row.id}
+                                onChange={async (e) => {
+                                  const inputEl = e.currentTarget;
+                                  const file = e.target.files?.[0];
+                                  if (file) await handleClassTypeRowImageUpload(row.id, file);
+                                  inputEl.value = '';
+                                }}
+                                className="sr-only"
+                              />
+                            </label>
                             <div>
                               <p className="text-[9px] font-black uppercase tracking-widest text-zinc-400 mb-1">Icono</p>
                               <div className="grid grid-cols-5 gap-1">
@@ -963,7 +1216,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                               value={row.description || ''}
                               onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, description: e.target.value } : x))}
                               placeholder="Descripción"
-                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
+                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 min-h-[44px]"
                             />
                             <input
                               type="number"
@@ -971,8 +1224,17 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                               step={1}
                               inputMode="numeric"
                               pattern="[0-9]*"
-                              value={row.duration || 60}
-                              onChange={(e) => setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, duration: Number(e.target.value || 60) } : x))}
+                              value={classTypeDurationDrafts[row.id] ?? String(row.duration || 60)}
+                              onChange={(e) => setClassTypeDurationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                              onBlur={() => {
+                                const normalized = normalizeIntegerInput(
+                                  classTypeDurationDrafts[row.id] ?? String(row.duration || 60),
+                                  Number(row.duration || 60),
+                                  15
+                                );
+                                setClassTypeDurationDrafts((prev) => ({ ...prev, [row.id]: String(normalized) }));
+                                setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, duration: normalized } : x));
+                              }}
                               placeholder="Duración"
                               className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
                             />
@@ -984,15 +1246,19 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       {editingClassTypeId === row.id ? (
                         <button
                           type="button"
+                          disabled={uploadingClassTypeRowId === row.id}
                           onClick={() => handleUpdateClassType(row.id)}
-                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-brand text-white"
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-brand text-white disabled:opacity-60"
                         >
-                          Guardar
+                          {uploadingClassTypeRowId === row.id ? 'Subiendo...' : 'Guardar'}
                         </button>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => setEditingClassTypeId(row.id)}
+                          onClick={() => {
+                            setClassTypeDurationDrafts((prev) => ({ ...prev, [row.id]: String(row.duration || 60) }));
+                            setEditingClassTypeId(row.id);
+                          }}
                           className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
                         >
                           Editar
@@ -1101,30 +1367,80 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Mínimo de Alumnos</label>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      max={formData.maxCapacity}
-                      value={formData.minCapacity}
-                      onChange={(e) => setFormData(prev => ({ ...prev, minCapacity: Number(e.target.value || 1) }))}
-                      className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
-                    />
+                    <div className="flex items-stretch gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(minCapacityInput, Number(formData.minCapacity || 1), -1, setMinCapacityInput, 1, Number(formData.maxCapacity || 8))}
+                        className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Reducir minimo de alumnos"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        max={formData.maxCapacity}
+                        value={minCapacityInput}
+                        onChange={(e) => setMinCapacityInput(e.target.value)}
+                        onBlur={() => {
+                          const maxCapacity = Number(formData.maxCapacity || 8);
+                          const normalized = normalizeIntegerInput(minCapacityInput, Number(formData.minCapacity || 1), 1, maxCapacity);
+                          const adjusted = Math.min(normalized, maxCapacity);
+                          setFormData(prev => ({ ...prev, minCapacity: adjusted }));
+                          setMinCapacityInput(String(adjusted));
+                        }}
+                        className="flex-1 min-w-0 bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all min-h-[44px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(minCapacityInput, Number(formData.minCapacity || 1), 1, setMinCapacityInput, 1, Number(formData.maxCapacity || 8))}
+                        className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Aumentar minimo de alumnos"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Máximo de Alumnos</label>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={formData.maxCapacity}
-                      onChange={(e) => setFormData(prev => ({ ...prev, maxCapacity: Number(e.target.value || 8) }))}
-                      className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all"
-                    />
+                    <div className="flex items-stretch gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(maxCapacityInput, Number(formData.maxCapacity || 8), -1, setMaxCapacityInput, Number(formData.minCapacity || 1))}
+                        className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Reducir maximo de alumnos"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={maxCapacityInput}
+                        onChange={(e) => setMaxCapacityInput(e.target.value)}
+                        onBlur={() => {
+                          const minCapacity = Number(formData.minCapacity || 1);
+                          const normalized = normalizeIntegerInput(maxCapacityInput, Number(formData.maxCapacity || 8), minCapacity);
+                          const adjusted = Math.max(normalized, minCapacity);
+                          setFormData(prev => ({ ...prev, maxCapacity: adjusted }));
+                          setMaxCapacityInput(String(adjusted));
+                        }}
+                        className="flex-1 min-w-0 bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-sm sm:text-base font-bold text-zinc-900 text-center outline-none focus:border-brand transition-all min-h-[44px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(maxCapacityInput, Number(formData.maxCapacity || 8), 1, setMaxCapacityInput, Number(formData.minCapacity || 1))}
+                        className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Aumentar maximo de alumnos"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1157,18 +1473,41 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
 
                         <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-2">
                           <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500">Duración de la programación (semanas)</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={24}
-                            step={1}
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            value={recurrenceConfig.weeks}
-                            onChange={(e) => setRecurrenceConfig((prev) => ({ ...prev, weeks: Number(e.target.value || 4) }))}
-                            className="w-full border border-zinc-200 rounded-xl p-3 text-sm font-semibold text-zinc-800 outline-none focus:border-zinc-900"
-                            placeholder="Ejemplo: 4"
-                          />
+                          <div className="flex items-stretch gap-2 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => bumpIntegerInput(weeksInput, Number(recurrenceConfig.weeks || 4), -1, setWeeksInput, 1, 24)}
+                              className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                              aria-label="Reducir semanas"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              max={24}
+                              step={1}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={weeksInput}
+                              onChange={(e) => setWeeksInput(e.target.value)}
+                              onBlur={() => {
+                                const normalized = normalizeIntegerInput(weeksInput, Number(recurrenceConfig.weeks || 4), 1, 24);
+                                setRecurrenceConfig((prev) => ({ ...prev, weeks: normalized }));
+                                setWeeksInput(String(normalized));
+                              }}
+                              className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm font-semibold text-zinc-800 outline-none focus:border-zinc-900 min-h-[44px]"
+                              placeholder="Ejemplo: 4"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => bumpIntegerInput(weeksInput, Number(recurrenceConfig.weeks || 4), 1, setWeeksInput, 1, 24)}
+                              className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
+                              aria-label="Aumentar semanas"
+                            >
+                              +
+                            </button>
+                          </div>
                           <p className="text-[10px] font-semibold text-zinc-500">Define cuántas semanas estará activa esta recurrencia.</p>
                         </div>
                       </div>
@@ -1286,11 +1625,13 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                   </div>
                 )}
 
-                {!yearLoading && yearInstances.map(inst => (
+                {!yearLoading && yearInstances.map(inst => {
+                  const liveImage = getLiveClassImage(inst);
+                  return (
                   <div key={inst.id} className="bg-white border border-zinc-100 p-4 sm:p-6 rounded-xl sm:rounded-[2rem] hover:border-brand transition-all hover:shadow-lg">
-                    {inst.imageUrl && (
+                    {liveImage && (
                       <img
-                        src={inst.imageUrl}
+                        src={liveImage}
                         alt={inst.type}
                         className="w-full h-32 sm:h-40 object-cover rounded-xl mb-4 border border-zinc-100"
                       />
@@ -1320,7 +1661,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
                 {!yearLoading && yearInstances.length === 0 && (
                   <div className="p-8 sm:p-12 text-center border-2 border-dashed border-zinc-200 rounded-xl sm:rounded-[2rem]">
                      <i className="fas fa-calendar-times text-3xl sm:text-4xl text-zinc-300 mb-3 sm:mb-4"></i>

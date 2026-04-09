@@ -4,10 +4,16 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
 import { Pool } from 'pg';
+import dotenv from 'dotenv';
 import { readFile, writeFile } from 'node:fs/promises';
 import { emailService } from './lib/emailService.ts';
 import crypto from 'node:crypto';
+
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT || 3000);
@@ -16,6 +22,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const emailConfigPath = path.resolve(process.cwd(), 'email-config.json');
 const APP_BASE_URL = String(process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');
+const MAX_IMAGE_UPLOAD_BYTES = 8 * 1024 * 1024;
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES }
+});
+const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
+const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
+const missingCloudinaryEnv = [
+  !cloudinaryCloudName ? 'CLOUDINARY_CLOUD_NAME' : null,
+  !cloudinaryApiKey ? 'CLOUDINARY_API_KEY' : null,
+  !cloudinaryApiSecret ? 'CLOUDINARY_API_SECRET' : null
+].filter(Boolean) as string[];
+const hasCloudinaryConfig = Boolean(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
+if (hasCloudinaryConfig) {
+  cloudinary.config({
+    cloud_name: cloudinaryCloudName,
+    api_key: cloudinaryApiKey,
+    api_secret: cloudinaryApiSecret,
+    secure: true
+  });
+}
 
 const pgPool = new Pool({
   host: process.env.PGHOST || 'localhost',
@@ -72,6 +100,28 @@ const persistEmailConfig = async (config: StoredEmailConfig) => {
 };
 
 const randomToken = () => crypto.randomBytes(24).toString('hex');
+const uploadImageToCloudinary = async (buffer: Buffer, folder = 'focus-fitness') => {
+  const result = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'image'
+      },
+      (error, uploaded) => {
+        if (error || !uploaded?.secure_url || !uploaded?.public_id) {
+          reject(error || new Error('No se pudo subir la imagen a Cloudinary.'));
+          return;
+        }
+        resolve({
+          secure_url: uploaded.secure_url,
+          public_id: uploaded.public_id
+        });
+      }
+    );
+    stream.end(buffer);
+  });
+  return result;
+};
 
 const getBusinessNotificationEmail = async () => {
   const cfg = await readEmailConfig();
@@ -156,6 +206,7 @@ const syncStudentCredits = async (studentId: string) => {
       WHERE sb.alumno_id = $1
         AND sb.estado = 'active'
         AND sa.estado = 'active'
+        AND COALESCE(sa.congelado, 0) = 0
         AND sb.deleted_at IS NULL
         AND sa.deleted_at IS NULL
     `,
@@ -263,6 +314,43 @@ app.delete('/api/class-types/:id', async (req, res) => {
   } catch {
     res.status(500).json({ error: 'No se pudo eliminar el tipo de clase.' });
   }
+});
+
+app.post('/api/upload/image', (req, res) => {
+  imageUpload.single('image')(req, res, async (error: any) => {
+    try {
+      if (!hasCloudinaryConfig) {
+        console.error('[UPLOAD] Cloudinary config faltante', missingCloudinaryEnv);
+        return res.status(500).json({
+          error: 'La carga de imágenes no está disponible en este entorno.',
+          ...(IS_PROD ? {} : { missing: missingCloudinaryEnv })
+        });
+      }
+      if (error) {
+        if (error?.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'La imagen excede el tamaño máximo permitido (8 MB).' });
+        }
+        return res.status(400).json({ error: 'No pudimos procesar el archivo seleccionado.' });
+      }
+
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file) {
+        return res.status(400).json({ error: 'Selecciona una imagen para continuar.' });
+      }
+      if (!String(file.mimetype || '').startsWith('image/')) {
+        return res.status(400).json({ error: 'El archivo debe ser una imagen válida (JPG, PNG, WEBP, etc.).' });
+      }
+
+      const uploaded = await uploadImageToCloudinary(file.buffer);
+      return res.status(201).json({
+        secure_url: uploaded.secure_url,
+        public_id: uploaded.public_id
+      });
+    } catch (err: any) {
+      console.error('[UPLOAD] Error subiendo imagen a Cloudinary:', err?.message || err);
+      return res.status(500).json({ error: 'No pudimos subir la imagen. Intenta de nuevo en unos segundos.' });
+    }
+  });
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -963,7 +1051,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
       new Set(activeReservations.map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
     for (const studentId of affectedStudentIds) {
-      await syncStudentCredits(studentId);
+      await syncStudentCredits(String(studentId));
     }
 
     const businessEmail = await getBusinessNotificationEmail();
@@ -1074,7 +1162,7 @@ app.delete('/api/classes/:id', async (req, res) => {
       new Set((activeReservations.rows as any[]).map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
     for (const studentId of affectedStudentIds) {
-      await syncStudentCredits(studentId);
+      await syncStudentCredits(String(studentId));
     }
     res.json({ success: true, refunded_students: affectedStudentIds.length });
   } catch {
@@ -1413,6 +1501,7 @@ app.get('/api/students/:id/dashboard', async (req, res) => {
         AND sb.deleted_at IS NULL
         AND sa.deleted_at IS NULL
         AND sa.estado = 'active'
+        AND COALESCE(sa.congelado, 0) = 0
       ORDER BY sa.fecha_vencimiento ASC
       LIMIT 1
     `,
@@ -1590,6 +1679,9 @@ app.post('/api/coach/subscriptions', async (req, res) => {
   try {
     const alumnoId = String(req.body?.alumno_id || req.body?.alumnoId || req.body?.studentId || '').trim();
     const paqueteId = String(req.body?.paquete_id || req.body?.paqueteId || req.body?.packageId || '').trim();
+    const reuseActiveSubscription = Boolean(
+      req.body?.reuse_active_subscription ?? req.body?.reuseActiveSubscription ?? false
+    );
     const rawMonto = req.body?.monto ?? req.body?.amount;
     const parsedMonto = Number(rawMonto);
     const metodoPago = String(req.body?.metodo_pago || req.body?.metodoPago || req.body?.paymentMethod || 'Transferencia').trim();
@@ -1601,33 +1693,137 @@ app.post('/api/coach/subscriptions', async (req, res) => {
     if (!pkg) return res.status(404).json({ error: 'El paquete seleccionado no existe.' });
 
     await client.query('BEGIN');
-    const subId = createId('subs_');
     const totalClases = Number(pkg.numero_clases || 0);
-    const fechaCompra = new Date();
-    const fechaVencimiento = new Date(fechaCompra);
-    fechaVencimiento.setDate(fechaVencimiento.getDate() + Number(pkg.vigencia_semanas || 0) * 7);
-    await client.query(
-      `
-      INSERT INTO suscripciones_alumno (
-        id, alumno_id, paquete_id, fecha_compra, fecha_vencimiento, clases_totales, clases_restantes, clases_consumidas, estado, created_at, updated_at
-      ) VALUES ($1,$2,$3,CURRENT_TIMESTAMP,$4,$5,$5,0,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    `,
-      [subId, alumnoId, paqueteId, fechaVencimiento.toISOString(), totalClases]
-    );
-
     const assigned = Math.floor(totalClases / Math.max(Number(pkg.capacidad || 1), 1));
-    const titularId = createId('sb_');
-    await client.query(
-      `
-      INSERT INTO suscripcion_beneficiarios (
-        id, suscripcion_id, alumno_id, es_titular, clases_asignadas, clases_restantes, estado, created_at, updated_at
-      ) VALUES ($1,$2,$3,1,$4,$4,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    `,
-      [titularId, subId, alumnoId, assigned]
-    );
-
     const packagePrice = Number(pkg.precio_base || 0);
     const finalAmount = Number.isFinite(parsedMonto) && parsedMonto >= 0 ? parsedMonto : packagePrice;
+    const actorId = String(req.body?.actor_id || 'coach').trim() || 'coach';
+
+    let subId = createId('subs_');
+    let reused = false;
+
+    if (reuseActiveSubscription) {
+      const existingSubRes = await client.query(
+        `
+        SELECT id, fecha_vencimiento
+        FROM suscripciones_alumno
+        WHERE alumno_id = $1
+          AND paquete_id = $2
+          AND estado = 'active'
+          AND deleted_at IS NULL
+        ORDER BY fecha_vencimiento DESC, created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+        [alumnoId, paqueteId]
+      );
+
+      const existingSub: any = existingSubRes.rows[0];
+      if (existingSub) {
+        reused = true;
+        subId = String(existingSub.id);
+
+        const now = new Date();
+        const currentExpiry = existingSub.fecha_vencimiento ? new Date(existingSub.fecha_vencimiento) : now;
+        const expiryBase = currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
+        const newExpiry = new Date(expiryBase);
+        newExpiry.setDate(newExpiry.getDate() + Number(pkg.vigencia_semanas || 0) * 7);
+
+        await client.query(
+          `
+          UPDATE suscripciones_alumno
+          SET clases_totales = clases_totales + $2,
+              clases_restantes = clases_restantes + $2,
+              fecha_vencimiento = $3,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+          [subId, totalClases, newExpiry.toISOString()]
+        );
+
+        const titularRes = await client.query(
+          `
+          SELECT id, clases_asignadas, clases_restantes
+          FROM suscripcion_beneficiarios
+          WHERE suscripcion_id = $1
+            AND alumno_id = $2
+            AND es_titular = 1
+            AND deleted_at IS NULL
+          LIMIT 1
+          FOR UPDATE
+        `,
+          [subId, alumnoId]
+        );
+        const titular: any = titularRes.rows[0];
+        const before = Number(titular?.clases_restantes || 0);
+        const after = before + assigned;
+
+        if (titular) {
+          await client.query(
+            `
+            UPDATE suscripcion_beneficiarios
+            SET clases_asignadas = COALESCE(clases_asignadas, 0) + $2,
+                clases_restantes = COALESCE(clases_restantes, 0) + $2,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+          `,
+            [titular.id, assigned]
+          );
+        } else {
+          await client.query(
+            `
+            INSERT INTO suscripcion_beneficiarios (
+              id, suscripcion_id, alumno_id, es_titular, clases_asignadas, clases_restantes, estado, created_at, updated_at
+            ) VALUES ($1,$2,$3,1,$4,$4,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          `,
+            [createId('sb_'), subId, alumnoId, assigned]
+          );
+        }
+
+        await client.query(
+          `
+          INSERT INTO ajustes_credito (
+            id, alumno_id, suscripcion_id, actor_id, ajuste, motivo, clases_restantes_antes, clases_restantes_despues, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        `,
+          [
+            createId('adj_'),
+            alumnoId,
+            subId,
+            actorId,
+            assigned,
+            `Reutilizacion de suscripcion activa (${pkg.nombre || 'paquete'})`,
+            before,
+            after
+          ]
+        );
+      }
+    }
+
+    if (!reused) {
+      const fechaCompra = new Date();
+      const fechaVencimiento = new Date(fechaCompra);
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + Number(pkg.vigencia_semanas || 0) * 7);
+      await client.query(
+        `
+        INSERT INTO suscripciones_alumno (
+          id, alumno_id, paquete_id, fecha_compra, fecha_vencimiento, clases_totales, clases_restantes, clases_consumidas, estado, created_at, updated_at
+        ) VALUES ($1,$2,$3,CURRENT_TIMESTAMP,$4,$5,$5,0,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `,
+        [subId, alumnoId, paqueteId, fechaVencimiento.toISOString(), totalClases]
+      );
+
+      const titularId = createId('sb_');
+      await client.query(
+        `
+        INSERT INTO suscripcion_beneficiarios (
+          id, suscripcion_id, alumno_id, es_titular, clases_asignadas, clases_restantes, estado, created_at, updated_at
+        ) VALUES ($1,$2,$3,1,$4,$4,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `,
+        [titularId, subId, alumnoId, assigned]
+      );
+    }
 
     await client.query(
       `
@@ -1640,7 +1836,7 @@ app.post('/api/coach/subscriptions', async (req, res) => {
     await client.query('COMMIT');
     await syncStudentCredits(alumnoId);
     const created = await getOne(`SELECT * FROM suscripciones_alumno WHERE id = $1`, [subId]);
-    res.status(201).json(created);
+    res.status(201).json({ ...created, reused });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo registrar la suscripciÃ³n.' });
@@ -1761,6 +1957,19 @@ app.post('/api/coach/subscriptions/:subscriptionId/freeze', async (req, res) => 
   try {
     const subscriptionId = req.params.subscriptionId;
     const action = String(req.body?.action || 'pause');
+    const beneficiaryRows = await query<{ alumno_id: string }>(
+      `
+      SELECT alumno_id
+      FROM suscripcion_beneficiarios
+      WHERE suscripcion_id = $1
+        AND deleted_at IS NULL
+    `,
+      [subscriptionId]
+    );
+    const affectedStudentIds = Array.from(
+      new Set((beneficiaryRows || []).map((row) => String(row.alumno_id || '').trim()).filter(Boolean))
+    );
+
     if (action === 'pause') {
       await query(
         `
@@ -1798,10 +2007,178 @@ app.post('/api/coach/subscriptions/:subscriptionId/freeze', async (req, res) => 
         );
       }
     }
+    for (const studentId of affectedStudentIds) {
+      await syncStudentCredits(String(studentId));
+    }
     const updated = await getOne(`SELECT * FROM suscripciones_alumno WHERE id = $1`, [subscriptionId]);
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'No se pudo actualizar el estado de congelamiento.' });
+  }
+});
+
+app.post('/api/coach/subscriptions/:subscriptionId/unassign', async (req, res) => {
+  const client = await pgPool.connect();
+  try {
+    const subscriptionId = req.params.subscriptionId;
+    const alumnoId = String(req.body?.alumno_id || req.body?.alumnoId || req.body?.studentId || '').trim();
+    const actorId = String(req.body?.actor_id || 'coach').trim() || 'coach';
+    if (!subscriptionId || !alumnoId) {
+      return res.status(400).json({ error: 'Suscripcion y alumno son obligatorios para desasignar.' });
+    }
+
+    await client.query('BEGIN');
+
+    const subRes = await client.query(
+      `
+      SELECT id
+      FROM suscripciones_alumno
+      WHERE id = $1
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [subscriptionId]
+    );
+    const subscription: any = subRes.rows[0];
+    if (!subscription) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos la suscripcion seleccionada.' });
+    }
+
+    const targetRes = await client.query(
+      `
+      SELECT id, es_titular, clases_restantes
+      FROM suscripcion_beneficiarios
+      WHERE suscripcion_id = $1
+        AND alumno_id = $2
+        AND deleted_at IS NULL
+      LIMIT 1
+      FOR UPDATE
+    `,
+      [subscriptionId, alumnoId]
+    );
+    const target: any = targetRes.rows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos al alumno dentro de la suscripcion seleccionada.' });
+    }
+
+    const affectedStudentIds = new Set<string>();
+
+    if (Number(target.es_titular || 0) === 1) {
+      const allBeneficiariesRes = await client.query(
+        `
+        SELECT id, alumno_id, clases_restantes
+        FROM suscripcion_beneficiarios
+        WHERE suscripcion_id = $1
+          AND deleted_at IS NULL
+        FOR UPDATE
+      `,
+        [subscriptionId]
+      );
+
+      for (const beneficiary of allBeneficiariesRes.rows as any[]) {
+        const before = Number(beneficiary.clases_restantes || 0);
+        await client.query(
+          `
+          UPDATE suscripcion_beneficiarios
+          SET estado = 'inactive',
+              clases_asignadas = 0,
+              clases_restantes = 0,
+              deleted_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+          [beneficiary.id]
+        );
+        await client.query(
+          `
+          INSERT INTO ajustes_credito (
+            id, alumno_id, suscripcion_id, actor_id, ajuste, motivo, clases_restantes_antes, clases_restantes_despues, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        `,
+          [
+            createId('adj_'),
+            beneficiary.alumno_id,
+            subscriptionId,
+            actorId,
+            -before,
+            'Desasignacion de paquete por correccion manual',
+            before
+          ]
+        );
+        affectedStudentIds.add(String(beneficiary.alumno_id || '').trim());
+      }
+
+      await client.query(
+        `
+        UPDATE suscripciones_alumno
+        SET estado = 'inactive',
+            clases_restantes = 0,
+            deleted_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [subscriptionId]
+      );
+    } else {
+      const before = Number(target.clases_restantes || 0);
+      await client.query(
+        `
+        UPDATE suscripcion_beneficiarios
+        SET estado = 'inactive',
+            clases_asignadas = 0,
+            clases_restantes = 0,
+            deleted_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [target.id]
+      );
+      await client.query(
+        `
+        UPDATE suscripciones_alumno
+        SET clases_restantes = GREATEST(clases_restantes - $2, 0),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [subscriptionId, before]
+      );
+      await client.query(
+        `
+        INSERT INTO ajustes_credito (
+          id, alumno_id, suscripcion_id, actor_id, ajuste, motivo, clases_restantes_antes, clases_restantes_despues, created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `,
+        [
+          createId('adj_'),
+          alumnoId,
+          subscriptionId,
+          actorId,
+          -before,
+          'Desasignacion de paquete por correccion manual',
+          before
+        ]
+      );
+      affectedStudentIds.add(alumnoId);
+    }
+
+    await client.query('COMMIT');
+
+    for (const studentId of Array.from(affectedStudentIds)) {
+      if (!studentId) continue;
+      await syncStudentCredits(studentId);
+    }
+
+    const updated = await getOne(`SELECT * FROM suscripciones_alumno WHERE id = $1`, [subscriptionId]);
+    res.json({ success: true, subscription: updated });
+  } catch {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: 'No se pudo desasignar la suscripcion.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1850,34 +2227,85 @@ app.post('/api/coach/students/:id/manual-credits', async (req, res) => {
       [alumnoId]
     );
     const beneficiary: any = beneficiaryRes.rows[0];
-    if (!beneficiary) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'El alumno no tiene una suscripciÃ³n activa para ajustar crÃ©ditos.' });
+    if (beneficiary) {
+      const before = Number(beneficiary.clases_restantes || 0);
+      const after = Math.max(0, before + amount);
+      const diff = after - before;
+      await client.query(
+        `UPDATE suscripcion_beneficiarios SET clases_restantes = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [beneficiary.id, after]
+      );
+      await client.query(
+        `UPDATE suscripciones_alumno SET clases_restantes = GREATEST(clases_restantes + $2, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [beneficiary.suscripcion_id, diff]
+      );
+      await client.query(
+        `
+        INSERT INTO ajustes_credito (
+          id, alumno_id, suscripcion_id, actor_id, ajuste, motivo, clases_restantes_antes, clases_restantes_despues, created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `,
+        [
+          createId('adj_'),
+          alumnoId,
+          beneficiary.suscripcion_id,
+          req.body?.actor_id || 'coach',
+          diff,
+          reason,
+          before,
+          after
+        ]
+      );
+      await client.query('COMMIT');
+      await syncStudentCredits(alumnoId);
+      const profile = await getOne(`SELECT * FROM profiles WHERE id = $1`, [alumnoId]);
+      return res.json({ success: true, profile: sanitizeProfile(profile) });
     }
-    const before = Number(beneficiary.clases_restantes || 0);
+
+    const profileRowRes = await client.query(
+      `
+      SELECT credits_remaining
+      FROM profiles
+      WHERE id = $1
+        AND deleted_at IS NULL
+      FOR UPDATE
+    `,
+      [alumnoId]
+    );
+    const profileRow: any = profileRowRes.rows[0];
+    if (!profileRow) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos al alumno para ajustar creditos.' });
+    }
+
+    const before = Number(profileRow.credits_remaining || 0);
     const after = Math.max(0, before + amount);
     const diff = after - before;
+
     await client.query(
-      `UPDATE suscripcion_beneficiarios SET clases_restantes = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [beneficiary.id, after]
+      `
+      UPDATE profiles
+      SET credits_remaining = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `,
+      [alumnoId, after]
     );
-    await client.query(
-      `UPDATE suscripciones_alumno SET clases_restantes = GREATEST(clases_restantes + $2, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [beneficiary.suscripcion_id, diff]
-    );
+
     await client.query(
       `
       INSERT INTO ajustes_credito (
         id, alumno_id, suscripcion_id, actor_id, ajuste, motivo, clases_restantes_antes, clases_restantes_despues, created_at, updated_at
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `,
-      [createId('adj_'), alumnoId, beneficiary.suscripcion_id, req.body?.actor_id || 'coach', diff, reason, before, after]
+      [createId('adj_'), alumnoId, req.body?.actor_id || 'coach', diff, reason, before, after]
     );
+
     await client.query('COMMIT');
-    await syncStudentCredits(alumnoId);
     const profile = await getOne(`SELECT * FROM profiles WHERE id = $1`, [alumnoId]);
-    res.json({ success: true, profile: sanitizeProfile(profile) });
+    return res.json({ success: true, profile: sanitizeProfile(profile) });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo aplicar el ajuste de crÃ©ditos.' });
@@ -1936,6 +2364,7 @@ app.get('/api/coach/community', async (_req, res) => {
         p.full_name,
         p.email_verified,
         p.whatsapp_phone,
+        p.credits_remaining,
         sa.id AS subscription_id,
         pa.nombre AS package_name,
         sa.fecha_vencimiento,
@@ -2070,10 +2499,23 @@ app.get('/api/coach/students/:id/subscriptions', async (req, res) => {
   try {
     const subscriptions = await query(
       `
-      SELECT sa.*, pa.nombre AS package_name
+      SELECT
+        sa.*,
+        pa.nombre AS package_name,
+        pa.capacidad AS package_capacity,
+        sb.es_titular,
+        sb.clases_restantes AS alumno_clases_restantes,
+        sb.clases_asignadas AS alumno_clases_asignadas,
+        titular_sb.alumno_id AS titular_alumno_id,
+        titular_p.full_name AS titular_nombre
       FROM suscripcion_beneficiarios sb
       JOIN suscripciones_alumno sa ON sa.id = sb.suscripcion_id
       LEFT JOIN paquetes pa ON pa.id = sa.paquete_id
+      LEFT JOIN suscripcion_beneficiarios titular_sb
+        ON titular_sb.suscripcion_id = sa.id
+       AND titular_sb.es_titular = 1
+       AND titular_sb.deleted_at IS NULL
+      LEFT JOIN profiles titular_p ON titular_p.id = titular_sb.alumno_id
       WHERE sb.alumno_id = $1
         AND sb.deleted_at IS NULL
         AND sa.deleted_at IS NULL
@@ -2111,6 +2553,243 @@ app.get('/api/coach/students/:id/subscriptions', async (req, res) => {
     res.json({ subscriptions, activity });
   } catch {
     res.status(500).json({ error: 'No se pudieron obtener las suscripciones del alumno.' });
+  }
+});
+
+app.get('/api/coach/students/:id/history', async (req, res) => {
+  try {
+    const studentId = String(req.params.id || '').trim();
+    if (!studentId) {
+      return res.status(400).json({ error: 'ID de alumno invalido.' });
+    }
+
+    const attendance = await query<any>(
+      `
+      SELECT
+        ra.id AS event_id,
+        ra.estado,
+        ra.asistio_en AS occurred_at,
+        c.id AS class_id,
+        c.type AS class_type,
+        c.date AS class_date,
+        c.start_time AS class_start_time,
+        c.end_time AS class_end_time
+      FROM registros_asistencia ra
+      LEFT JOIN classes c ON c.id = ra.clase_id
+      WHERE ra.alumno_id = $1
+        AND ra.deleted_at IS NULL
+      `,
+      [studentId]
+    );
+
+    const reservations = await query<any>(
+      `
+      SELECT
+        r.id AS reservation_id,
+        r.status,
+        r.cancellation_reason,
+        r.created_at,
+        r.updated_at,
+        c.id AS class_id,
+        c.type AS class_type,
+        c.date AS class_date,
+        c.start_time AS class_start_time,
+        c.end_time AS class_end_time
+      FROM reservations r
+      LEFT JOIN classes c ON c.id = r.class_id
+      WHERE r.user_id = $1
+        AND r.deleted_at IS NULL
+      `,
+      [studentId]
+    );
+
+    const creditAdjustments = await query<any>(
+      `
+      SELECT
+        ac.id AS event_id,
+        ac.ajuste,
+        ac.motivo,
+        ac.clases_restantes_antes,
+        ac.clases_restantes_despues,
+        ac.created_at AS occurred_at
+      FROM ajustes_credito ac
+      WHERE ac.alumno_id = $1
+        AND ac.deleted_at IS NULL
+      `,
+      [studentId]
+    );
+
+    const payments = await query<any>(
+      `
+      SELECT
+        tp.id AS event_id,
+        tp.monto,
+        tp.moneda,
+        tp.metodo_pago,
+        tp.referencia,
+        tp.fecha_pago AS occurred_at,
+        pa.nombre AS package_name
+      FROM transacciones_pago tp
+      LEFT JOIN paquetes pa ON pa.id = tp.paquete_id
+      WHERE tp.alumno_id = $1
+        AND tp.deleted_at IS NULL
+      `,
+      [studentId]
+    );
+    const profileCredits = await getOne<{ credits_remaining: number }>(
+      `SELECT credits_remaining FROM profiles WHERE id = $1 AND deleted_at IS NULL`,
+      [studentId]
+    );
+
+    const formatEventDate = (dateValue: string | Date) => {
+      const dt = new Date(dateValue);
+      return {
+        fecha: dt.toLocaleDateString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+        hora: dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+      };
+    };
+
+    const buildClassReference = (row: any) => {
+      const type = String(row?.class_type || 'Clase');
+      const date = String(row?.class_date || '').slice(0, 10);
+      const start = String(row?.class_start_time || '').slice(0, 5);
+      const end = String(row?.class_end_time || '').slice(0, 5);
+      const dateAndTime = [date, start && end ? `${start}-${end}` : start].filter(Boolean).join(' ');
+      return dateAndTime ? `${type} | ${dateAndTime}` : type;
+    };
+
+    const timeline: Array<any> = [];
+
+    for (const row of attendance) {
+      const when = row?.occurred_at || new Date().toISOString();
+      const { fecha, hora } = formatEventDate(when);
+      timeline.push({
+        id: row.event_id,
+        tipo: 'attendance',
+        evento: 'Asistencia registrada',
+        referencia: buildClassReference(row),
+        ajuste: null,
+        motivo: row.estado ? `Estado: ${row.estado}` : null,
+        fecha,
+        hora,
+        timestamp: new Date(when).toISOString()
+      });
+    }
+
+    for (const row of reservations) {
+      const bookedAt = row?.created_at || new Date().toISOString();
+      const bookedDate = formatEventDate(bookedAt);
+      timeline.push({
+        id: `${row.reservation_id}_booked`,
+        tipo: 'reservation',
+        evento: 'Reserva de clase',
+        referencia: buildClassReference(row),
+        ajuste: -1,
+        motivo: 'Credito usado en reserva',
+        fecha: bookedDate.fecha,
+        hora: bookedDate.hora,
+        timestamp: new Date(bookedAt).toISOString()
+      });
+
+      if (String(row?.status || '').toLowerCase() !== 'active') {
+        const canceledAt = row?.updated_at || bookedAt;
+        let refundDelta = 1;
+        let refundReason = 'Credito devuelto por cancelacion del negocio.';
+
+        if (String(row?.cancellation_reason || '') === 'cancelacion_usuario') {
+          const cancellationDeadline = await calculateCancellationDeadline(
+            String(row?.class_date || ''),
+            String(row?.class_start_time || '')
+          );
+          const canceledDate = new Date(canceledAt);
+          if (canceledDate > cancellationDeadline) {
+            refundDelta = 0;
+            refundReason = 'Cancelacion tardia: el credito no fue devuelto.';
+          } else {
+            refundReason = 'Cancelacion en tiempo: credito devuelto.';
+          }
+        }
+
+        const canceledDateLabel = formatEventDate(canceledAt);
+        timeline.push({
+          id: `${row.reservation_id}_cancelled`,
+          tipo: 'cancellation',
+          evento: 'Cancelacion de reserva',
+          referencia: buildClassReference(row),
+          ajuste: refundDelta,
+          motivo: refundReason,
+          fecha: canceledDateLabel.fecha,
+          hora: canceledDateLabel.hora,
+          timestamp: new Date(canceledAt).toISOString()
+        });
+      }
+    }
+
+    for (const row of creditAdjustments) {
+      const when = row?.occurred_at || new Date().toISOString();
+      const { fecha, hora } = formatEventDate(when);
+      const before = row?.clases_restantes_antes;
+      const after = row?.clases_restantes_despues;
+      const refParts = [];
+      if (before != null) refParts.push(`Antes: ${before}`);
+      if (after != null) refParts.push(`Despues: ${after}`);
+      timeline.push({
+        id: row.event_id,
+        tipo: 'credit_adjustment',
+        evento: 'Ajuste manual de creditos',
+        referencia: refParts.join(' | ') || 'Ajuste de creditos',
+        ajuste: Number(row?.ajuste || 0),
+        motivo: row?.motivo || null,
+        fecha,
+        hora,
+        timestamp: new Date(when).toISOString()
+      });
+    }
+
+    for (const row of payments) {
+      const when = row?.occurred_at || new Date().toISOString();
+      const { fecha, hora } = formatEventDate(when);
+      const amount = Number(row?.monto || 0);
+      const money = Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+      const method = String(row?.metodo_pago || '').trim();
+      const packageName = String(row?.package_name || 'Paquete');
+      const parts = [`${packageName}`, `${money} ${String(row?.moneda || 'MXN')}`];
+      if (method) parts.push(method);
+      if (row?.referencia) parts.push(`Ref: ${row.referencia}`);
+      timeline.push({
+        id: row.event_id,
+        tipo: 'package_sale',
+        evento: 'Registro de pago de paquete',
+        referencia: parts.join(' | '),
+        ajuste: null,
+        motivo: null,
+        fecha,
+        hora,
+        timestamp: new Date(when).toISOString()
+      });
+    }
+
+    const history = timeline
+      .filter((item) => item?.timestamp)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 200);
+
+    let rollingAfter = Number(profileCredits?.credits_remaining || 0);
+    for (const event of history) {
+      const delta = Number(event?.ajuste);
+      if (Number.isFinite(delta)) {
+        event.saldo_despues = rollingAfter;
+        event.saldo_antes = rollingAfter - delta;
+        rollingAfter = event.saldo_antes;
+      } else {
+        event.saldo_antes = null;
+        event.saldo_despues = null;
+      }
+    }
+
+    res.json({ studentId, history });
+  } catch {
+    res.status(500).json({ error: 'No se pudo obtener el historial del alumno.' });
   }
 });
 

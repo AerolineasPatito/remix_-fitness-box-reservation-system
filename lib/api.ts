@@ -134,6 +134,15 @@ export const api = {
     });
     return handleResponse(res);
   },
+  uploadImage: async (file: File) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch('/api/upload/image', {
+      method: 'POST',
+      body: formData
+    });
+    return handleResponse(res);
+  },
   getAvailability: async () => {
     const res = await fetch('/api/availability');
     return handleResponse(res);
@@ -261,11 +270,15 @@ export const api = {
       const res = await fetch(`/api/coach/packages/${id}`, { method: 'DELETE' });
       return handleResponse(res);
     },
-    createSubscription: async (data: any) => {
+    createSubscription: async (data: any, options?: { reuse_active_subscription?: boolean }) => {
+      const payload =
+        options?.reuse_active_subscription === undefined
+          ? data
+          : { ...(data || {}), reuse_active_subscription: Boolean(options.reuse_active_subscription) };
       const res = await fetch('/api/coach/subscriptions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(payload)
       });
       return handleResponse(res);
     },
@@ -286,6 +299,14 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action })
+      });
+      return handleResponse(res);
+    },
+    unassignSubscription: async (subscriptionId: string, data: any) => {
+      const res = await fetch(`/api/coach/subscriptions/${subscriptionId}/unassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
       });
       return handleResponse(res);
     },
@@ -345,6 +366,10 @@ export const api = {
     },
     getStudentSubscriptions: async (id: string) => {
       const res = await fetch(`/api/coach/students/${id}/subscriptions`);
+      return handleResponse(res);
+    },
+    getStudentHistory: async (id: string) => {
+      const res = await fetch(`/api/coach/students/${id}/history`);
       return handleResponse(res);
     },
     getCashCut: async (filters?: { year?: number | string; month?: number | string; startDate?: string; endDate?: string }) => {

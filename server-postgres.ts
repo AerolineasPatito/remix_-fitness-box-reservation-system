@@ -535,10 +535,10 @@ app.get('/api/class-types', async (_req, res) => {
   try {
     const rows = await query(
       `
-      SELECT id, name, image_url, icon, color_theme, description, duration, is_active, created_at, updated_at
+      SELECT id, name, image_url, icon, color_theme, description, sort_order, duration, is_active, created_at, updated_at
       FROM class_types
       WHERE is_active = 1
-      ORDER BY name ASC
+      ORDER BY sort_order ASC, name ASC
     `
     );
     res.json(rows);
@@ -557,13 +557,20 @@ app.post('/api/class-types', async (req, res) => {
     const colorTheme = String(req.body?.color_theme || req.body?.colorTheme || '').trim() || null;
     const description = String(req.body?.description || '').trim() || null;
     const duration = Number(req.body?.duration ?? 60);
+    const requestedSortOrder = Number.parseInt(String(req.body?.sort_order ?? req.body?.sortOrder ?? ''), 10);
+    const maxSortRow = await getOne<{ max_sort: number }>(
+      `SELECT COALESCE(MAX(sort_order), 0)::int AS max_sort FROM class_types WHERE is_active = 1`
+    );
+    const sortOrder = Number.isFinite(requestedSortOrder)
+      ? Math.max(0, requestedSortOrder)
+      : Number(maxSortRow?.max_sort || 0) + 1;
 
     await query(
       `
-      INSERT INTO class_types (id, name, image_url, icon, color_theme, description, duration, is_active, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO class_types (id, name, image_url, icon, color_theme, description, sort_order, duration, is_active, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `,
-      [id, name, imageUrl, icon, colorTheme, description, Number.isFinite(duration) ? duration : 60]
+      [id, name, imageUrl, icon, colorTheme, description, sortOrder, Number.isFinite(duration) ? duration : 60]
     );
     const created = await getOne(`SELECT * FROM class_types WHERE id = $1`, [id]);
     res.status(201).json(created);
@@ -573,6 +580,7 @@ app.post('/api/class-types', async (req, res) => {
 });
 
 app.put('/api/class-types/:id', async (req, res) => {
+  const client = await pgPool.connect();
   try {
     const id = req.params.id;
     const name = String(req.body?.name || '').trim();
@@ -582,7 +590,60 @@ app.put('/api/class-types/:id', async (req, res) => {
     const colorTheme = String(req.body?.color_theme || req.body?.colorTheme || '').trim() || null;
     const description = String(req.body?.description || '').trim() || null;
     const duration = Number(req.body?.duration ?? 60);
-    await query(
+    const parsedSortOrder = Number.parseInt(String(req.body?.sort_order ?? req.body?.sortOrder ?? ''), 10);
+    const hasSortOrder = Number.isFinite(parsedSortOrder);
+
+    await client.query('BEGIN');
+
+    const currentRes = await client.query<{ sort_order: number }>(
+      `SELECT sort_order FROM class_types WHERE id = $1 AND is_active = 1 FOR UPDATE`,
+      [id]
+    );
+    const current = currentRes.rows[0];
+    if (!current) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No encontramos el tipo de clase solicitado.' });
+    }
+
+    let targetSortOrder = Number(current.sort_order || 0);
+    if (hasSortOrder) {
+      const maxRes = await client.query<{ max_sort: number }>(
+        `SELECT COALESCE(MAX(sort_order), 0)::int AS max_sort FROM class_types WHERE is_active = 1`
+      );
+      const maxSort = Number(maxRes.rows[0]?.max_sort || 0);
+      targetSortOrder = Math.max(0, Math.min(Number(parsedSortOrder), maxSort));
+    }
+
+    const currentSortOrder = Number(current.sort_order || 0);
+    if (hasSortOrder && targetSortOrder !== currentSortOrder) {
+      if (targetSortOrder < currentSortOrder) {
+        await client.query(
+          `
+          UPDATE class_types
+          SET sort_order = sort_order + 1, updated_at = CURRENT_TIMESTAMP
+          WHERE is_active = 1
+            AND id <> $1
+            AND sort_order >= $2
+            AND sort_order < $3
+        `,
+          [id, targetSortOrder, currentSortOrder]
+        );
+      } else {
+        await client.query(
+          `
+          UPDATE class_types
+          SET sort_order = sort_order - 1, updated_at = CURRENT_TIMESTAMP
+          WHERE is_active = 1
+            AND id <> $1
+            AND sort_order <= $2
+            AND sort_order > $3
+        `,
+          [id, targetSortOrder, currentSortOrder]
+        );
+      }
+    }
+
+    await client.query(
       `
       UPDATE class_types
       SET name = $2,
@@ -591,21 +652,51 @@ app.put('/api/class-types/:id', async (req, res) => {
           color_theme = $5,
           description = $6,
           duration = $7,
+          sort_order = $8,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
     `,
-      [id, name, imageUrl, icon, colorTheme, description, Number.isFinite(duration) ? duration : 60]
+      [
+        id,
+        name,
+        imageUrl,
+        icon,
+        colorTheme,
+        description,
+        Number.isFinite(duration) ? duration : 60,
+        targetSortOrder
+      ]
     );
+
+    await client.query('COMMIT');
     const updated = await getOne(`SELECT * FROM class_types WHERE id = $1`, [id]);
     res.json(updated);
   } catch {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'No se pudo actualizar el tipo de clase.' });
+  } finally {
+    client.release();
   }
 });
 
 app.delete('/api/class-types/:id', async (req, res) => {
   try {
     await query(`UPDATE class_types SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [req.params.id]);
+    await query(
+      `
+      WITH ordered AS (
+        SELECT id, (ROW_NUMBER() OVER (ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC) - 1)::int AS next_sort
+        FROM class_types
+        WHERE is_active = 1
+      )
+      UPDATE class_types ct
+      SET sort_order = ordered.next_sort,
+          updated_at = CURRENT_TIMESTAMP
+      FROM ordered
+      WHERE ct.id = ordered.id
+        AND ct.sort_order <> ordered.next_sort
+    `
+    );
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: 'No se pudo eliminar el tipo de clase.' });
@@ -2922,25 +3013,30 @@ app.get('/api/coach/community', async (_req, res) => {
         p.email_verified,
         p.whatsapp_phone,
         p.credits_remaining,
-        sa.id AS subscription_id,
-        pa.nombre AS package_name,
-        sa.fecha_vencimiento,
-        sb.clases_restantes,
-        COALESCE(
-          (
-            SELECT COALESCE(c2.type, '')
-            FROM reservations r2
-            JOIN classes c2 ON c2.id = r2.class_id
-            WHERE r2.user_id = p.id
-              AND r2.status = 'active'
-              AND r2.deleted_at IS NULL
-              AND c2.deleted_at IS NULL
-              AND to_timestamp(c2.date || ' ' || c2.start_time, 'YYYY-MM-DD HH24:MI') >= NOW()
-            ORDER BY c2.date ASC, c2.start_time ASC
-            LIMIT 1
-          ),
-          ''
-        ) AS proxima_clase
+        p.total_attended,
+        CASE
+          WHEN sa.id IS NULL THEN NULL
+          ELSE json_build_object(
+            'id', sa.id,
+            'package_name', pa.nombre,
+            'fecha_vencimiento', sa.fecha_vencimiento,
+            'clases_restantes', COALESCE(sb.clases_restantes, 0)
+          )
+        END AS current_subscription,
+        active_data.active_class,
+        next_data.next_class,
+        notice_data.last_cancellation_notified_at,
+        CASE WHEN notice_data.last_cancellation_notified_at IS NULL THEN FALSE ELSE TRUE END AS notified_by_email,
+        CASE
+          WHEN sa.fecha_vencimiento IS NULL THEN NULL
+          ELSE (sa.fecha_vencimiento::date - (CURRENT_TIMESTAMP AT TIME ZONE $1)::date)
+        END AS days_to_expiry,
+        CASE
+          WHEN sa.id IS NULL THEN FALSE
+          WHEN COALESCE(sb.clases_restantes, p.credits_remaining, 0) <= 2 THEN TRUE
+          WHEN sa.fecha_vencimiento IS NOT NULL AND (sa.fecha_vencimiento::date - (CURRENT_TIMESTAMP AT TIME ZONE $1)::date) <= 5 THEN TRUE
+          ELSE FALSE
+        END AS warning_low_battery
       FROM profiles p
       LEFT JOIN LATERAL (
         SELECT sb2.*
@@ -2956,9 +3052,54 @@ app.get('/api/coach/community', async (_req, res) => {
       ) sb ON true
       LEFT JOIN suscripciones_alumno sa ON sa.id = sb.suscripcion_id
       LEFT JOIN paquetes pa ON pa.id = sa.paquete_id
+      LEFT JOIN LATERAL (
+        SELECT json_build_object(
+          'id', c3.id,
+          'type', c3.type,
+          'date', c3.date,
+          'start_time', c3.start_time,
+          'end_time', c3.end_time
+        ) AS active_class
+        FROM reservations r3
+        JOIN classes c3 ON c3.id = r3.class_id
+        WHERE r3.user_id = p.id
+          AND r3.status = 'active'
+          AND r3.deleted_at IS NULL
+          AND c3.deleted_at IS NULL
+          AND to_timestamp(c3.date || ' ' || c3.start_time, 'YYYY-MM-DD HH24:MI') <= (CURRENT_TIMESTAMP AT TIME ZONE $1)
+          AND to_timestamp(c3.date || ' ' || c3.end_time, 'YYYY-MM-DD HH24:MI') > (CURRENT_TIMESTAMP AT TIME ZONE $1)
+        ORDER BY c3.date ASC, c3.start_time ASC
+        LIMIT 1
+      ) active_data ON true
+      LEFT JOIN LATERAL (
+        SELECT json_build_object(
+          'id', c4.id,
+          'type', c4.type,
+          'date', c4.date,
+          'start_time', c4.start_time,
+          'end_time', c4.end_time
+        ) AS next_class
+        FROM reservations r4
+        JOIN classes c4 ON c4.id = r4.class_id
+        WHERE r4.user_id = p.id
+          AND r4.status = 'active'
+          AND r4.deleted_at IS NULL
+          AND c4.deleted_at IS NULL
+          AND to_timestamp(c4.date || ' ' || c4.start_time, 'YYYY-MM-DD HH24:MI') > (CURRENT_TIMESTAMP AT TIME ZONE $1)
+        ORDER BY c4.date ASC, c4.start_time ASC
+        LIMIT 1
+      ) next_data ON true
+      LEFT JOIN LATERAL (
+        SELECT MAX(cancellation_notified_at) AS last_cancellation_notified_at
+        FROM reservations rn
+        WHERE rn.user_id = p.id
+          AND rn.cancellation_notified_to_student = 1
+          AND rn.cancellation_notified_at IS NOT NULL
+      ) notice_data ON true
       WHERE p.role = 'student' AND p.deleted_at IS NULL
       ORDER BY p.full_name ASC
-    `
+    `,
+      [APP_TIMEZONE]
     );
     res.json(rows);
   } catch {
@@ -4138,9 +4279,29 @@ const ensureClassesEventColumn = async () => {
   await query(`ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_event INTEGER NOT NULL DEFAULT 0`);
 };
 
+const ensureClassTypesSortOrderColumn = async () => {
+  await query(`ALTER TABLE class_types ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`);
+  await query(
+    `
+    WITH ordered AS (
+      SELECT id, (ROW_NUMBER() OVER (ORDER BY sort_order ASC, name ASC, created_at ASC, id ASC) - 1)::int AS next_sort
+      FROM class_types
+      WHERE is_active = 1
+    )
+    UPDATE class_types ct
+    SET sort_order = ordered.next_sort,
+        updated_at = CURRENT_TIMESTAMP
+    FROM ordered
+    WHERE ct.id = ordered.id
+      AND ct.sort_order <> ordered.next_sort
+  `
+  );
+};
+
 const start = async () => {
   try {
     await pgPool.query('SELECT 1');
+    await ensureClassTypesSortOrderColumn();
     await ensureClassesEventColumn();
     await ensureCoachHighlightsTable();
     await ensureAdmin();

@@ -102,21 +102,6 @@ const normalizeIntegerInput = (raw: string, fallback: number, min = 0, max?: num
   if (typeof max === 'number' && parsed > max) return max;
   return parsed;
 };
-const bumpIntegerInput = (
-  value: string,
-  fallback: number,
-  delta: number,
-  setValue: (next: string) => void,
-  min = 0,
-  max?: number
-) => {
-  const base = normalizeIntegerInput(value, fallback, min, max);
-  let next = base + delta;
-  if (next < min) next = min;
-  if (typeof max === 'number' && next > max) next = max;
-  setValue(String(next));
-};
-
 export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) => {
   const {
     classTypes: sharedClassTypes,
@@ -247,7 +232,43 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
   const loadCommunity = async () => {
     const data = await api.coach.getCommunity();
-    setCommunity(Array.isArray(data) ? data : []);
+    const normalized = (Array.isArray(data) ? data : []).map((row: any) => {
+      const currentSubscription =
+        row?.current_subscription ||
+        (row?.subscription_id
+          ? {
+              id: row.subscription_id,
+              package_name: row.package_name || null,
+              fecha_vencimiento: row.fecha_vencimiento || null,
+              clases_restantes: row.clases_restantes ?? row.credits_remaining ?? 0
+            }
+          : null);
+
+      const nextClass =
+        row?.next_class ||
+        (row?.proxima_clase
+          ? {
+              type: String(row.proxima_clase || '')
+            }
+          : null);
+
+      return {
+        ...row,
+        email_verified: Number(row?.email_verified || 0),
+        credits_remaining: Number(row?.credits_remaining || 0),
+        total_attended: Number(row?.total_attended || 0),
+        current_subscription: currentSubscription,
+        active_class: row?.active_class || null,
+        next_class: nextClass,
+        notified_by_email: Boolean(row?.notified_by_email),
+        days_to_expiry:
+          row?.days_to_expiry == null || row?.days_to_expiry === ''
+            ? null
+            : Number(row.days_to_expiry),
+        warning_low_battery: Boolean(row?.warning_low_battery)
+      } as CommunityStudent;
+    });
+    setCommunity(normalized);
   };
 
   const loadWhatsAppTemplates = async () => {
@@ -1060,165 +1081,53 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Capacidad</label>
-                  <div className="flex items-stretch gap-2 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.capacidad,
-                          Number.parseInt(packageForm.capacidad || '1', 10) || 1,
-                          -1,
-                          (next) => setPackageForm((prev) => ({ ...prev, capacidad: next })),
-                          1,
-                          3
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Reducir capacidad"
-                    >
-                      -
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      step={1}
-                      min={1}
-                      max={3}
-                      className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm text-center min-h-[44px]"
-                      placeholder="Capacidad"
-                      value={packageForm.capacidad}
-                      onChange={(e) => setPackageForm((prev) => ({ ...prev, capacidad: e.target.value }))}
-                      onBlur={() => {
-                        const normalized = Math.min(3, Math.max(1, Number.parseInt(packageForm.capacidad || '1', 10) || 1));
-                        setPackageForm((prev) => ({ ...prev, capacidad: String(normalized) }));
-                      }}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.capacidad,
-                          Number.parseInt(packageForm.capacidad || '1', 10) || 1,
-                          1,
-                          (next) => setPackageForm((prev) => ({ ...prev, capacidad: next })),
-                          1,
-                          3
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Aumentar capacidad"
-                    >
-                      +
-                    </button>
-                  </div>
+                  <select
+                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                    value={packageForm.capacidad}
+                    onChange={(e) => setPackageForm((prev) => ({ ...prev, capacidad: e.target.value }))}
+                  >
+                    <option value="1">1 persona</option>
+                    <option value="2">2 personas</option>
+                    <option value="3">3 personas</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Numero de Clases</label>
-                  <div className="flex items-stretch gap-2 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.numero_clases,
-                          Number.parseInt(packageForm.numero_clases || '1', 10) || 1,
-                          -1,
-                          (next) => setPackageForm((prev) => ({ ...prev, numero_clases: next })),
-                          1
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Reducir numero de clases"
-                    >
-                      -
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      step={1}
-                      min={1}
-                      className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm text-center min-h-[44px]"
-                      placeholder="Clases"
-                      value={packageForm.numero_clases}
-                      onChange={(e) => setPackageForm((prev) => ({ ...prev, numero_clases: e.target.value }))}
-                      onBlur={() => {
-                        const normalized = Math.max(1, Number.parseInt(packageForm.numero_clases || '1', 10) || 1);
-                        setPackageForm((prev) => ({ ...prev, numero_clases: String(normalized) }));
-                      }}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.numero_clases,
-                          Number.parseInt(packageForm.numero_clases || '1', 10) || 1,
-                          1,
-                          (next) => setPackageForm((prev) => ({ ...prev, numero_clases: next })),
-                          1
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Aumentar numero de clases"
-                    >
-                      +
-                    </button>
-                  </div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    step={1}
+                    min={1}
+                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                    placeholder="Ej. 12"
+                    value={packageForm.numero_clases}
+                    onChange={(e) => setPackageForm((prev) => ({ ...prev, numero_clases: e.target.value }))}
+                    onBlur={() => {
+                      const normalized = Math.max(1, Number.parseInt(packageForm.numero_clases || '1', 10) || 1);
+                      setPackageForm((prev) => ({ ...prev, numero_clases: String(normalized) }));
+                    }}
+                    required
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Vigencia</label>
-                  <div className="flex items-stretch gap-2 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.vigencia_semanas,
-                          Number.parseInt(packageForm.vigencia_semanas || '1', 10) || 1,
-                          -1,
-                          (next) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: next })),
-                          1
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Reducir vigencia"
-                    >
-                      -
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      step={1}
-                      min={1}
-                      className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm text-center min-h-[44px]"
-                      placeholder="Semanas"
-                      value={packageForm.vigencia_semanas}
-                      onChange={(e) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: e.target.value }))}
-                      onBlur={() => {
-                        const normalized = Math.max(1, Number.parseInt(packageForm.vigencia_semanas || '1', 10) || 1);
-                        setPackageForm((prev) => ({ ...prev, vigencia_semanas: String(normalized) }));
-                      }}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        bumpIntegerInput(
-                          packageForm.vigencia_semanas,
-                          Number.parseInt(packageForm.vigencia_semanas || '1', 10) || 1,
-                          1,
-                          (next) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: next })),
-                          1
-                        )
-                      }
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Aumentar vigencia"
-                    >
-                      +
-                    </button>
-                  </div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    step={1}
+                    min={1}
+                    className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                    placeholder="Ej. 4 semanas"
+                    value={packageForm.vigencia_semanas}
+                    onChange={(e) => setPackageForm((prev) => ({ ...prev, vigencia_semanas: e.target.value }))}
+                    onBlur={() => {
+                      const normalized = Math.max(1, Number.parseInt(packageForm.vigencia_semanas || '1', 10) || 1);
+                      setPackageForm((prev) => ({ ...prev, vigencia_semanas: String(normalized) }));
+                    }}
+                    required
+                  />
                 </div>
               </div>
               <div>
@@ -1893,32 +1802,39 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
               <form onSubmit={handleManualCredits} className="space-y-3 border-t border-zinc-100 pt-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Ajuste manual de créditos</p>
-                <div className="flex items-stretch gap-2 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const current = Number.parseInt(manualCreditsForm.amount || '0', 10);
-                      const next = (Number.isFinite(current) ? current : 0) - 1;
-                      setManualCreditsForm((prev) => ({ ...prev, amount: String(next) }));
-                    }}
-                    className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                    aria-label="Reducir ajuste"
-                  >
-                    -
-                  </button>
-                  <input type="number" inputMode="numeric" pattern="-?[0-9]*" step={1} className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm text-center min-h-[44px]" placeholder="Cantidad (+/-)" value={manualCreditsForm.amount} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))} required />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const current = Number.parseInt(manualCreditsForm.amount || '0', 10);
-                      const next = (Number.isFinite(current) ? current : 0) + 1;
-                      setManualCreditsForm((prev) => ({ ...prev, amount: String(next) }));
-                    }}
-                    className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                    aria-label="Aumentar ajuste"
-                  >
-                    +
-                  </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Ajuste rápido</label>
+                    <select
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      value={manualCreditsForm.amount}
+                      onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    >
+                      <option value="">Selecciona ajuste</option>
+                      <option value="-10">-10 créditos</option>
+                      <option value="-5">-5 créditos</option>
+                      <option value="-2">-2 créditos</option>
+                      <option value="-1">-1 crédito</option>
+                      <option value="1">+1 crédito</option>
+                      <option value="2">+2 créditos</option>
+                      <option value="5">+5 créditos</option>
+                      <option value="10">+10 créditos</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-1">Cantidad personalizada (+/-)</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      pattern="-?[0-9]*"
+                      step={1}
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      placeholder="Ej. -3 o +4"
+                      value={manualCreditsForm.amount}
+                      onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, amount: e.target.value }))}
+                      required
+                    />
+                  </div>
                 </div>
                 <input className="border border-zinc-200 rounded-xl p-3 text-sm w-full" placeholder="Motivo" value={manualCreditsForm.reason} onChange={(e) => setManualCreditsForm((prev) => ({ ...prev, reason: e.target.value }))} required />
                 <button disabled={!selectedStudentId || loading} className="px-5 py-3 rounded-xl bg-zinc-900 text-white text-[10px] font-black uppercase tracking-widest">Aplicar ajuste</button>
@@ -1935,32 +1851,31 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   ))}
                 </select>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="flex items-stretch gap-2 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const current = Number.parseFloat(subscriptionForm.monto || '0');
-                        const next = Math.max(0, (Number.isFinite(current) ? current : 0) - 50);
-                        setSubscriptionForm((prev) => ({ ...prev, monto: String(next) }));
-                      }}
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Reducir monto"
-                    >
-                      -
-                    </button>
-                    <input type="number" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" min={0} step="0.01" className="flex-1 min-w-0 border border-zinc-200 rounded-xl p-3 text-sm text-center min-h-[44px]" placeholder="Monto (opcional)" value={subscriptionForm.monto} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, monto: e.target.value }))} />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const current = Number.parseFloat(subscriptionForm.monto || '0');
-                        const next = Math.max(0, (Number.isFinite(current) ? current : 0) + 50);
-                        setSubscriptionForm((prev) => ({ ...prev, monto: String(next) }));
-                      }}
-                      className="w-10 min-h-[44px] shrink-0 rounded-xl border border-zinc-200 bg-white text-zinc-700 font-black"
-                      aria-label="Aumentar monto"
-                    >
-                      +
-                    </button>
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-400">Monto (opcional)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      pattern="[0-9]*[.]?[0-9]*"
+                      min={0}
+                      step="0.01"
+                      className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[44px]"
+                      placeholder="Ej. 1399"
+                      value={subscriptionForm.monto}
+                      onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, monto: e.target.value }))}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      {[500, 899, 1000, 1399, 1999, 2899, 3599].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setSubscriptionForm((prev) => ({ ...prev, monto: String(preset) }))}
+                          className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px]"
+                        >
+                          {money(preset)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <select className="border border-zinc-200 rounded-xl p-3 text-sm" value={subscriptionForm.metodo_pago} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, metodo_pago: e.target.value }))}>
                     <option value="transferencia">Transferencia</option>

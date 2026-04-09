@@ -9,6 +9,7 @@ type ClassTypeItem = {
   icon?: string;
   color_theme?: string;
   description?: string;
+  sort_order?: number;
   duration?: number;
   is_active?: number;
 };

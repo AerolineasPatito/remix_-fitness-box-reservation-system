@@ -81,6 +81,8 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     if (typeof max === 'number' && next > max) next = max;
     setValue(String(next));
   };
+  const toDisplaySortOrder = (storedValue: number) => Math.max(1, Number(storedValue || 0) + 1);
+  const toStoredSortOrder = (displayValue: number) => Math.max(0, Number(displayValue || 1) - 1);
 
   const { addNotification, removeNotification } = useNotifications();
   const { classTypes: sharedClassTypes, classTypesLoading, refreshClassTypes, refreshAvailability, refreshClasses } = useAppData();
@@ -97,7 +99,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [calendarYearInstances, setCalendarYearInstances] = useState<ClassInstance[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [selectedCalendarClass, setSelectedCalendarClass] = useState<ClassInstance | null>(null);
-  const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string; description?: string; duration?: number }>>([]);
+  const [classTypes, setClassTypes] = useState<Array<{ id: string; name: string; image_url?: string; icon?: string; color_theme?: string; description?: string; sort_order?: number; duration?: number }>>([]);
   const [showTypeManager, setShowTypeManager] = useState(false);
   const [editingClassTypeId, setEditingClassTypeId] = useState<string | null>(null);
   const [classTypeForm, setClassTypeForm] = useState({
@@ -106,6 +108,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     icon: 'fa-dumbbell',
     color_theme: 'brand',
     description: '',
+    sort_order: 0,
     duration: 60
   });
   
@@ -130,10 +133,12 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     daysOfWeek: [] as number[]
   });
   const [classTypeDurationInput, setClassTypeDurationInput] = useState('60');
+  const [classTypeSortOrderInput, setClassTypeSortOrderInput] = useState('1');
   const [minCapacityInput, setMinCapacityInput] = useState('1');
   const [maxCapacityInput, setMaxCapacityInput] = useState('8');
   const [weeksInput, setWeeksInput] = useState('4');
   const [classTypeDurationDrafts, setClassTypeDurationDrafts] = useState<Record<string, string>>({});
+  const [classTypeSortOrderDrafts, setClassTypeSortOrderDrafts] = useState<Record<string, string>>({});
   const [uploadingClassTypeImage, setUploadingClassTypeImage] = useState(false);
   const [uploadingClassTypeRowId, setUploadingClassTypeRowId] = useState<string | null>(null);
 
@@ -160,11 +165,16 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     const safeRows = Array.isArray(sharedClassTypes) ? sharedClassTypes : [];
     setClassTypes(safeRows as any[]);
     setClassTypeDurationDrafts({});
+    setClassTypeSortOrderDrafts({});
   }, [sharedClassTypes]);
 
   useEffect(() => {
     setClassTypeDurationInput(String(classTypeForm.duration || 60));
   }, [classTypeForm.duration]);
+
+  useEffect(() => {
+    setClassTypeSortOrderInput(String(toDisplaySortOrder(Number(classTypeForm.sort_order ?? 0))));
+  }, [classTypeForm.sort_order]);
 
   useEffect(() => {
     setMinCapacityInput(String(formData.minCapacity || 1));
@@ -507,16 +517,24 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     if (!classTypeForm.name.trim()) return;
     try {
       const normalizedDuration = normalizeIntegerInput(classTypeDurationInput, Number(classTypeForm.duration || 60), 15);
+      const normalizedSortOrderDisplay = normalizeIntegerInput(
+        classTypeSortOrderInput,
+        toDisplaySortOrder(Number(classTypeForm.sort_order || 0)),
+        1
+      );
+      const normalizedSortOrder = toStoredSortOrder(normalizedSortOrderDisplay);
       await api.createClassType({
         name: classTypeForm.name.trim(),
         image_url: classTypeForm.image_url.trim() || null,
         icon: classTypeForm.icon.trim() || null,
         color_theme: classTypeForm.color_theme.trim() || null,
         description: classTypeForm.description.trim() || null,
+        sort_order: normalizedSortOrder,
         duration: normalizedDuration
       });
-      setClassTypeForm({ name: '', image_url: '', icon: 'fa-dumbbell', color_theme: 'brand', description: '', duration: 60 });
+      setClassTypeForm({ name: '', image_url: '', icon: 'fa-dumbbell', color_theme: 'brand', description: '', sort_order: 0, duration: 60 });
       setClassTypeDurationInput('60');
+      setClassTypeSortOrderInput('1');
       await Promise.all([refreshClassTypes(), refreshClasses()]);
     } catch (err: any) {
       logger.error('Error creating class type', err);
@@ -529,10 +547,22 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     try {
       const durationDraft = classTypeDurationDrafts[id];
       const normalizedDuration = normalizeIntegerInput(durationDraft ?? String(row.duration || 60), Number(row.duration || 60), 15);
-      const payload = { ...row, duration: normalizedDuration };
+      const sortOrderDraft = classTypeSortOrderDrafts[id];
+      const normalizedSortOrderDisplay = normalizeIntegerInput(
+        sortOrderDraft ?? String(toDisplaySortOrder(Number(row.sort_order ?? 0))),
+        toDisplaySortOrder(Number(row.sort_order ?? 0)),
+        1
+      );
+      const normalizedSortOrder = toStoredSortOrder(normalizedSortOrderDisplay);
+      const payload = { ...row, duration: normalizedDuration, sort_order: normalizedSortOrder };
       await api.updateClassType(id, payload);
-      setClassTypes((prev) => prev.map((x) => (x.id === id ? { ...x, duration: normalizedDuration } : x)));
+      setClassTypes((prev) => prev.map((x) => (x.id === id ? { ...x, duration: normalizedDuration, sort_order: normalizedSortOrder } : x)));
       setClassTypeDurationDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setClassTypeSortOrderDrafts((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
@@ -1094,6 +1124,51 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                     </div>
                   </div>
 
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3">
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Posicion de aparicion</label>
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-zinc-200 text-zinc-500 flex items-center justify-center">
+                        <i className="fas fa-sort-numeric-down"></i>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(classTypeSortOrderInput, toDisplaySortOrder(Number(classTypeForm.sort_order || 0)), -1, setClassTypeSortOrderInput, 1)}
+                        className="ml-3 w-11 min-h-[44px] rounded-lg border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Reducir posicion"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={classTypeSortOrderInput}
+                        onChange={(e) => setClassTypeSortOrderInput(e.target.value)}
+                        onBlur={() => {
+                          const normalized = normalizeIntegerInput(
+                            classTypeSortOrderInput,
+                            toDisplaySortOrder(Number(classTypeForm.sort_order || 0)),
+                            1
+                          );
+                          setClassTypeForm((prev) => ({ ...prev, sort_order: toStoredSortOrder(normalized) }));
+                          setClassTypeSortOrderInput(String(normalized));
+                        }}
+                        className="ml-2 flex-1 bg-white border border-zinc-200 rounded-lg p-2 text-sm font-semibold min-h-[44px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => bumpIntegerInput(classTypeSortOrderInput, toDisplaySortOrder(Number(classTypeForm.sort_order || 0)), 1, setClassTypeSortOrderInput, 1)}
+                        className="ml-2 w-11 min-h-[44px] rounded-lg border border-zinc-200 bg-white text-zinc-700 font-black"
+                        aria-label="Aumentar posicion"
+                      >
+                        +
+                      </button>
+                      <span className="ml-3 text-xs font-black uppercase tracking-widest text-zinc-500">Posicion (1 = primero)</span>
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={uploadingClassTypeImage}
@@ -1158,6 +1233,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                           className={`text-sm font-bold rounded px-2 py-1 ${editingClassTypeId === row.id ? 'bg-zinc-50 border border-zinc-200' : 'bg-transparent'}`}
                         />
                         <p className="text-[10px] uppercase tracking-widest text-zinc-400">{row.color_theme || 'default'}</p>
+                        <p className="text-[10px] uppercase tracking-widest text-zinc-400">Posicion: {toDisplaySortOrder(Number(row.sort_order ?? 0))}</p>
                         {editingClassTypeId === row.id && (
                           <div className="mt-2 space-y-3">
                             <label className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-2 min-h-[44px] flex items-center justify-between gap-2 cursor-pointer">
@@ -1241,7 +1317,30 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                                 setClassTypeDurationDrafts((prev) => ({ ...prev, [row.id]: String(normalized) }));
                                 setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, duration: normalized } : x));
                               }}
-                              placeholder="Duración"
+                              placeholder="Duración (min)"
+                              aria-label="Duración en minutos"
+                              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={classTypeSortOrderDrafts[row.id] ?? String(toDisplaySortOrder(Number(row.sort_order ?? 0)))}
+                              onChange={(e) => setClassTypeSortOrderDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                              onBlur={() => {
+                                const normalizedDisplay = normalizeIntegerInput(
+                                  classTypeSortOrderDrafts[row.id] ?? String(toDisplaySortOrder(Number(row.sort_order ?? 0))),
+                                  toDisplaySortOrder(Number(row.sort_order ?? 0)),
+                                  1
+                                );
+                                const normalizedStored = toStoredSortOrder(normalizedDisplay);
+                                setClassTypeSortOrderDrafts((prev) => ({ ...prev, [row.id]: String(normalizedDisplay) }));
+                                setClassTypes((prev) => prev.map((x) => x.id === row.id ? { ...x, sort_order: normalizedStored } : x));
+                              }}
+                              placeholder="Posicion (1=primero)"
+                              aria-label="Posición de aparición"
                               className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1"
                             />
                           </div>
@@ -1263,6 +1362,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                           type="button"
                           onClick={() => {
                             setClassTypeDurationDrafts((prev) => ({ ...prev, [row.id]: String(row.duration || 60) }));
+                            setClassTypeSortOrderDrafts((prev) => ({ ...prev, [row.id]: String(toDisplaySortOrder(Number(row.sort_order ?? 0))) }));
                             setEditingClassTypeId(row.id);
                           }}
                           className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"

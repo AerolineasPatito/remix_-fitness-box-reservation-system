@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS class_types (
   icon TEXT,
   color_theme TEXT,
   description TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   duration INTEGER NOT NULL DEFAULT 60,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

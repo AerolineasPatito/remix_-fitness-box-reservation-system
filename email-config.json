@@ -1,5 +1,5 @@
 {
-  "provider": "smtp",
+  "provider": "console",
   "smtp": {
     "host": "cabreudev.com",
     "port": 465,

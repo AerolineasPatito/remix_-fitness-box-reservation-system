@@ -59,6 +59,10 @@ const getColorSwatchClass = (theme?: string) => {
   return found?.swatch || 'bg-zinc-800';
 };
 
+const ACTIVE_CLASSES_LIST_STEP = 10;
+const STUDENTS_LIST_STEP = 12;
+const CLASS_TYPES_LIST_STEP = 8;
+
 export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availability, onRefresh, onRefreshStudents }) => {
   const normalizeIntegerInput = (raw: string, fallback: number, min = 1, max?: number) => {
     const parsed = Number.parseInt(raw, 10);
@@ -141,6 +145,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
   const [classTypeSortOrderDrafts, setClassTypeSortOrderDrafts] = useState<Record<string, string>>({});
   const [uploadingClassTypeImage, setUploadingClassTypeImage] = useState(false);
   const [uploadingClassTypeRowId, setUploadingClassTypeRowId] = useState<string | null>(null);
+  const [activeClassesVisibleCount, setActiveClassesVisibleCount] = useState(ACTIVE_CLASSES_LIST_STEP);
+  const [studentsVisibleCount, setStudentsVisibleCount] = useState(STUDENTS_LIST_STEP);
+  const [classTypesVisibleCount, setClassTypesVisibleCount] = useState(CLASS_TYPES_LIST_STEP);
 
   const normalizeInstances = (data: any[]): ClassInstance[] =>
     (Array.isArray(data) ? data : []).map((d: any) => ({
@@ -188,6 +195,18 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
     setWeeksInput(String(recurrenceConfig.weeks || 4));
   }, [recurrenceConfig.weeks]);
 
+  useEffect(() => {
+    setActiveClassesVisibleCount(ACTIVE_CLASSES_LIST_STEP);
+  }, [yearInstances.length, selectedYear]);
+
+  useEffect(() => {
+    setStudentsVisibleCount(STUDENTS_LIST_STEP);
+  }, [students.length]);
+
+  useEffect(() => {
+    setClassTypesVisibleCount(CLASS_TYPES_LIST_STEP);
+  }, [classTypes.length, showTypeManager]);
+
   const classTypeImageById = useMemo(() => {
     const map = new Map<string, string>();
     (Array.isArray(classTypes) ? classTypes : []).forEach((row: any) => {
@@ -218,6 +237,9 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
       ''
     );
   };
+  const visibleYearInstances = yearInstances.slice(0, activeClassesVisibleCount);
+  const visibleStudents = students.slice(0, studentsVisibleCount);
+  const visibleClassTypes = classTypes.slice(0, classTypesVisibleCount);
 
   // Validación de horario conflictivo en tiempo real
   const hasScheduleConflict = useMemo(() => {
@@ -1215,13 +1237,13 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
               </div>
 
               <div className="space-y-2 max-h-64 overflow-auto">
-                {classTypes.map((row) => (
-                  <div key={row.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border border-zinc-100 rounded-xl p-3">
+                {visibleClassTypes.map((row) => (
+                  <div key={row.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-zinc-100 rounded-xl p-2.5">
                     <div className="flex items-start gap-3">
                       {row.image_url ? (
-                        <img src={row.image_url} alt={row.name} className="w-12 h-12 rounded-lg object-cover border border-zinc-200" />
+                        <img src={row.image_url} alt={row.name} className="w-10 h-10 rounded-lg object-cover border border-zinc-200" />
                       ) : (
-                        <div className="w-12 h-12 rounded-lg bg-zinc-100 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-lg bg-zinc-100 flex items-center justify-center">
                           <i className={`fas ${row.icon || 'fa-dumbbell'} text-zinc-500`}></i>
                         </div>
                       )}
@@ -1381,6 +1403,33 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                   </div>
                 ))}
                 {classTypes.length === 0 && <p className="text-sm text-zinc-400">No hay tipos registrados.</p>}
+                {classTypes.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <p className="text-[11px] text-zinc-500">
+                      Mostrando {Math.min(classTypesVisibleCount, classTypes.length)} de {classTypes.length} tipos
+                    </p>
+                    <div className="flex gap-2">
+                      {classTypesVisibleCount < classTypes.length && (
+                        <button
+                          type="button"
+                          onClick={() => setClassTypesVisibleCount((prev) => Math.min(prev + CLASS_TYPES_LIST_STEP, classTypes.length))}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                        >
+                          Ver mas
+                        </button>
+                      )}
+                      {classTypesVisibleCount > CLASS_TYPES_LIST_STEP && (
+                        <button
+                          type="button"
+                          onClick={() => setClassTypesVisibleCount(CLASS_TYPES_LIST_STEP)}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-600"
+                        >
+                          Ver menos
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1709,7 +1758,7 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
             </div>
 
             {/* Lista de Clases - Mobile Optimizado */}
-            <div className="space-y-3 sm:space-y-4">
+            <div className="space-y-2 sm:space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <div className="flex items-center gap-3">
                   <h3 className="text-xl sm:text-2xl font-bebas text-zinc-900 tracking-wide uppercase italic">Clases Activas</h3>
@@ -1744,48 +1793,79 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                   </div>
                 )}
 
-                {!yearLoading && yearInstances.map(inst => {
+                {!yearLoading && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {visibleYearInstances.map(inst => {
                   const liveImage = getLiveClassImage(inst);
                   return (
-                  <div key={inst.id} className="bg-white border border-zinc-100 p-4 sm:p-6 rounded-xl sm:rounded-[2rem] hover:border-brand transition-all hover:shadow-lg">
+                  <div key={inst.id} className="bg-white border border-zinc-100 p-3 sm:p-4 rounded-xl sm:rounded-2xl hover:border-brand transition-all hover:shadow-md">
                     {liveImage && (
                       <img
                         src={liveImage}
                         alt={inst.type}
-                        className="w-full h-32 sm:h-40 object-cover rounded-xl mb-4 border border-zinc-100"
+                        className="w-full h-24 sm:h-28 object-cover rounded-lg mb-3 border border-zinc-100"
                       />
                     )}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="flex items-center space-x-3 sm:space-x-4">
-                        <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-[1.5rem] flex items-center justify-center text-white ${getClassMeta(inst.type).color} shadow-lg flex-shrink-0`}>
-                           <span className="text-[10px] sm:text-xs font-black leading-tight text-center px-1">{formatClassDate(inst.date)}</span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center text-white ${getClassMeta(inst.type).color} shadow-sm flex-shrink-0`}>
+                           <span className="text-[9px] sm:text-[10px] font-black leading-tight text-center px-1">{formatClassDate(inst.date)}</span>
                         </div>
-                        <div className="space-y-1">
-                           <h4 className="text-lg sm:text-xl font-black text-zinc-900 uppercase tracking-tighter italic">{inst.type}</h4>
+                        <div className="space-y-1 min-w-0">
+                           <h4 className="text-base sm:text-lg font-black text-zinc-900 uppercase tracking-tight italic truncate">{inst.type}</h4>
                            {Number((inst as any).is_event || 0) === 1 && (
-                             <span className="inline-flex items-center px-2 py-1 rounded-lg bg-cyan-50 border border-cyan-200 text-[8px] font-black uppercase tracking-widest text-cyan-700">
+                             <span className="inline-flex items-center px-2 py-1 rounded-md bg-cyan-50 border border-cyan-200 text-[8px] font-black uppercase tracking-widest text-cyan-700">
                                Evento gratis
                              </span>
                            )}
                            <span className="text-[8px] sm:text-[9px] font-black text-zinc-400 uppercase tracking-widest">{inst.startTime} — {inst.endTime}</span>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3 sm:space-x-4">
+                      <div className="flex items-center space-x-2 sm:space-x-3">
                         <div className="text-center">
-                          <span className="text-lg sm:text-xl font-black text-brand">{availability[inst.id] || 0}</span>
+                          <span className="text-base sm:text-lg font-black text-brand">{availability[inst.id] || 0}</span>
                           <span className="text-[7px] sm:text-[8px] font-black text-zinc-400 uppercase tracking-widest block">/ {Number((inst as any).max_capacity || inst.capacity || 8)}</span>
                         </div>
                         <button 
                           onClick={() => setDeletingId(inst.id)} 
-                          className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-zinc-50 text-zinc-300 hover:text-rose-500 hover:bg-rose-50 border border-zinc-100 transition-all flex-shrink-0" 
+                          className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-zinc-50 text-zinc-300 hover:text-rose-500 hover:bg-rose-50 border border-zinc-100 transition-all flex-shrink-0" 
                           aria-label="Cancelar clase"
                         >
-                          <i className="fas fa-times text-sm sm:text-base"></i>
+                          <i className="fas fa-times text-xs sm:text-sm"></i>
                         </button>
                       </div>
                     </div>
                   </div>
                 )})}
+                  </div>
+                )}
+                {!yearLoading && yearInstances.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">
+                      Mostrando {Math.min(activeClassesVisibleCount, yearInstances.length)} de {yearInstances.length} clases
+                    </p>
+                    <div className="flex gap-2">
+                      {activeClassesVisibleCount < yearInstances.length && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveClassesVisibleCount((prev) => Math.min(prev + ACTIVE_CLASSES_LIST_STEP, yearInstances.length))}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                        >
+                          Ver mas
+                        </button>
+                      )}
+                      {activeClassesVisibleCount > ACTIVE_CLASSES_LIST_STEP && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveClassesVisibleCount(ACTIVE_CLASSES_LIST_STEP)}
+                          className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-600"
+                        >
+                          Ver menos
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {!yearLoading && yearInstances.length === 0 && (
                   <div className="p-8 sm:p-12 text-center border-2 border-dashed border-zinc-200 rounded-xl sm:rounded-[2rem]">
                      <i className="fas fa-calendar-times text-3xl sm:text-4xl text-zinc-300 mb-3 sm:mb-4"></i>
@@ -1832,10 +1912,10 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                 </div>
               ) : (
                 <>
-                  {students.map(student => (
-                    <div key={student.id} className="bg-white border border-zinc-100 rounded-xl sm:rounded-[2rem] p-4 sm:p-6 hover:border-brand transition-all hover:shadow-lg">
+                  {visibleStudents.map(student => (
+                    <div key={student.id} className="bg-white border border-zinc-100 rounded-xl sm:rounded-2xl p-3 sm:p-4 hover:border-brand transition-all hover:shadow-md">
                       {/* Mobile Layout */}
-                      <div className="flex flex-col sm:hidden space-y-4">
+                      <div className="flex flex-col sm:hidden space-y-3">
                         <div className="flex items-center space-x-3">
                           <div className="w-12 h-12 rounded-xl bg-brand/10 text-brand flex items-center justify-center font-bebas text-2xl italic flex-shrink-0">
                             {student.full_name?.charAt(0)}
@@ -1846,13 +1926,13 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                           </div>
                         </div>
                         
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="text-center bg-zinc-50 rounded-lg p-3">
-                            <span className="text-xl font-bebas text-zinc-900 italic leading-none block">{student.credits_remaining || 0}</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="text-center bg-zinc-50 rounded-lg p-2.5">
+                            <span className="text-lg font-bebas text-zinc-900 italic leading-none block">{student.credits_remaining || 0}</span>
                             <p className="text-[7px] font-black text-zinc-400 uppercase tracking-widest">Créditos</p>
                           </div>
-                          <div className="text-center bg-zinc-50 rounded-lg p-3">
-                            <span className="text-xl font-bebas text-zinc-400 italic leading-none block">{student.total_attended || 0}</span>
+                          <div className="text-center bg-zinc-50 rounded-lg p-2.5">
+                            <span className="text-lg font-bebas text-zinc-400 italic leading-none block">{student.total_attended || 0}</span>
                             <p className="text-[7px] font-black text-zinc-400 uppercase tracking-widest">Asistencias</p>
                           </div>
                         </div>
@@ -1861,14 +1941,14 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                           <button 
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 1)} 
-                            className="flex-1 py-3 bg-white border border-zinc-200 rounded-lg text-[8px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50"
+                            className="flex-1 py-2.5 bg-white border border-zinc-200 rounded-lg text-[8px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50"
                           >
                             {updatingStudentId === `${student.id}_1` ? <i className="fas fa-circle-notch fa-spin"></i> : '+1 Crédito'}
                           </button>
                           <button 
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 10)} 
-                            className="flex-1 py-3 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50"
+                            className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50"
                           >
                             {updatingStudentId === `${student.id}_10` ? <i className="fas fa-circle-notch fa-spin"></i> : '+10 Pack'}
                           </button>
@@ -1876,36 +1956,36 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       </div>
                       
                       {/* Desktop Layout */}
-                      <div className="hidden sm:grid grid-cols-5 items-center gap-4">
-                        <div className="col-span-2 flex items-center space-x-4">
-                          <div className="w-16 h-16 rounded-2xl bg-brand/10 text-brand flex items-center justify-center font-bebas text-3xl italic flex-shrink-0">
+                      <div className="hidden sm:grid grid-cols-12 items-center gap-3">
+                        <div className="col-span-6 lg:col-span-5 flex items-center space-x-3">
+                          <div className="w-12 h-12 rounded-xl bg-brand/10 text-brand flex items-center justify-center font-bebas text-2xl italic flex-shrink-0">
                             {student.full_name?.charAt(0)}
                           </div>
                           <div className="space-y-1 min-w-0">
-                            <p className="text-base font-black text-zinc-900 uppercase tracking-tight italic truncate">{student.full_name}</p>
+                            <p className="text-sm lg:text-base font-black text-zinc-900 uppercase tracking-tight italic truncate">{student.full_name}</p>
                             <p className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase truncate">{student.email}</p>
                           </div>
                         </div>
-                        <div className="text-center">
-                          <span className="text-3xl font-bebas text-zinc-900 italic leading-none">{student.credits_remaining || 0}</span>
+                        <div className="col-span-2 text-center">
+                          <span className="text-2xl font-bebas text-zinc-900 italic leading-none">{student.credits_remaining || 0}</span>
                           <p className="text-[8px] font-black text-zinc-300 uppercase tracking-widest mt-1">Créditos</p>
                         </div>
-                        <div className="text-center">
-                          <span className="text-3xl font-bebas text-zinc-400 italic leading-none">{student.total_attended || 0}</span>
+                        <div className="col-span-2 text-center">
+                          <span className="text-2xl font-bebas text-zinc-400 italic leading-none">{student.total_attended || 0}</span>
                           <p className="text-[8px] font-black text-zinc-300 uppercase tracking-widest mt-1">Asistencias</p>
                         </div>
-                        <div className="flex justify-end space-x-3">
+                        <div className="col-span-2 lg:col-span-3 flex justify-end space-x-2">
                           <button 
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 1)} 
-                            className="px-4 py-3 bg-white border border-zinc-200 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50 min-w-[60px]"
+                            className="px-3 py-2.5 bg-white border border-zinc-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:border-brand transition-all disabled:opacity-50 min-w-[56px]"
                           >
                             {updatingStudentId === `${student.id}_1` ? <i className="fas fa-circle-notch fa-spin"></i> : '+1'}
                           </button>
                           <button 
                             disabled={updatingStudentId !== null}
                             onClick={() => updateCredits(student.id, student.credits_remaining, 10)} 
-                            className="px-4 py-3 bg-zinc-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50 min-w-[100px]"
+                            className="px-3 py-2.5 bg-zinc-900 text-white rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-brand transition-all disabled:opacity-50 min-w-[92px]"
                           >
                             {updatingStudentId === `${student.id}_10` ? <i className="fas fa-circle-notch fa-spin"></i> : '+10 Pack'}
                           </button>
@@ -1913,6 +1993,33 @@ export const CoachPanel: React.FC<CoachPanelProps> = ({ user, instances, availab
                       </div>
                     </div>
                   ))}
+                  {students.length > 0 && (
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">
+                        Mostrando {Math.min(studentsVisibleCount, students.length)} de {students.length} atletas
+                      </p>
+                      <div className="flex gap-2">
+                        {studentsVisibleCount < students.length && (
+                          <button
+                            type="button"
+                            onClick={() => setStudentsVisibleCount((prev) => Math.min(prev + STUDENTS_LIST_STEP, students.length))}
+                            className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-700"
+                          >
+                            Ver mas
+                          </button>
+                        )}
+                        {studentsVisibleCount > STUDENTS_LIST_STEP && (
+                          <button
+                            type="button"
+                            onClick={() => setStudentsVisibleCount(STUDENTS_LIST_STEP)}
+                            className="px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest bg-zinc-100 text-zinc-600"
+                          >
+                            Ver menos
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {students.length === 0 && !loading && (
                     <div className="bg-white border-2 border-dashed border-zinc-200 rounded-xl sm:rounded-[2rem] p-8 sm:p-12 text-center">
                       <i className="fas fa-users text-4xl text-zinc-300 mb-4"></i>

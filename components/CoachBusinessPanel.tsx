@@ -79,6 +79,13 @@ const firstDayOfMonthIso = () => {
 const money = (value: number) =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 }).format(value || 0);
 
+const PACKAGE_LIST_STEP = 8;
+const COMMUNITY_LIST_STEP = 12;
+const SUBSCRIPTION_LIST_STEP = 6;
+const ACTIVITY_LIST_STEP = 10;
+const HIGHLIGHT_LIST_STEP = 8;
+const CASH_LIST_STEP = 10;
+
 const WHATSAPP_VARIABLES = [
   '{{nombre_alumno}}',
   '{{email_alumno}}',
@@ -169,6 +176,18 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
   const [activityFilterType, setActivityFilterType] = useState('all');
   const [activityDateFrom, setActivityDateFrom] = useState('');
   const [activityDateTo, setActivityDateTo] = useState('');
+  const [packageVisibleCount, setPackageVisibleCount] = useState(PACKAGE_LIST_STEP);
+  const [communityVisibleCount, setCommunityVisibleCount] = useState(COMMUNITY_LIST_STEP);
+  const [subscriptionVisibleCount, setSubscriptionVisibleCount] = useState(SUBSCRIPTION_LIST_STEP);
+  const [activityVisibleCount, setActivityVisibleCount] = useState(ACTIVITY_LIST_STEP);
+  const [highlightVisibleCount, setHighlightVisibleCount] = useState(HIGHLIGHT_LIST_STEP);
+  const [cashPackageVisibleCount, setCashPackageVisibleCount] = useState(CASH_LIST_STEP);
+  const [cashBreakdownVisible, setCashBreakdownVisible] = useState<Record<string, number>>({
+    diario: CASH_LIST_STEP,
+    semanal: CASH_LIST_STEP,
+    mensual: CASH_LIST_STEP,
+    anual: CASH_LIST_STEP
+  });
 
   const [cashRange, setCashRange] = useState({
     startDate: firstDayOfMonthIso(),
@@ -229,6 +248,38 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
     const safeList = Array.isArray(sharedClasses) ? sharedClasses : [];
     setClassCatalog(safeList.filter((item: any) => item?.status === 'active'));
   }, [sharedClasses]);
+
+  useEffect(() => {
+    setPackageVisibleCount(PACKAGE_LIST_STEP);
+  }, [packages.length]);
+
+  useEffect(() => {
+    setCommunityVisibleCount(COMMUNITY_LIST_STEP);
+  }, [community.length]);
+
+  useEffect(() => {
+    setSubscriptionVisibleCount(SUBSCRIPTION_LIST_STEP);
+    setActivityVisibleCount(ACTIVITY_LIST_STEP);
+  }, [selectedStudentId]);
+
+  useEffect(() => {
+    setActivityVisibleCount(ACTIVITY_LIST_STEP);
+  }, [activityFilterType, activityDateFrom, activityDateTo]);
+
+  useEffect(() => {
+    setHighlightVisibleCount(HIGHLIGHT_LIST_STEP);
+  }, [sortedHighlights.length]);
+
+  useEffect(() => {
+    const packageRows = Array.isArray(cashCutData?.porPaquete) ? cashCutData.porPaquete.length : 0;
+    setCashPackageVisibleCount(packageRows > 0 ? Math.min(CASH_LIST_STEP, packageRows) : CASH_LIST_STEP);
+    setCashBreakdownVisible({
+      diario: CASH_LIST_STEP,
+      semanal: CASH_LIST_STEP,
+      mensual: CASH_LIST_STEP,
+      anual: CASH_LIST_STEP
+    });
+  }, [cashCutData]);
 
   const loadCommunity = async () => {
     const data = await api.coach.getCommunity();
@@ -1036,6 +1087,13 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
     }
     return true;
   });
+  const visiblePackages = packages.slice(0, packageVisibleCount);
+  const visibleCommunity = community.slice(0, communityVisibleCount);
+  const visibleSubscriptionHistory = studentSubscriptions.slice(0, subscriptionVisibleCount);
+  const visibleActivityRows = filteredActivityRows.slice(0, activityVisibleCount);
+  const visibleHighlights = sortedHighlights.slice(0, highlightVisibleCount);
+  const cashPackageRows = Array.isArray(cashCutData?.porPaquete) ? cashCutData.porPaquete : [];
+  const visibleCashPackageRows = cashPackageRows.slice(0, cashPackageVisibleCount);
   const canManageBeneficiaries = !!(selectedActiveSubscription && Number(selectedActiveSubscription.package_capacity || 1) > 1 && Number(selectedActiveSubscription.es_titular || 0) === 1);
   const selectedSubscriptionBeneficiaries = Array.isArray(selectedActiveSubscription?.beneficiaries) ? selectedActiveSubscription.beneficiaries : [];
   const beneficiaryCandidateStudents = community.filter((student) => {
@@ -1174,7 +1232,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
             <div className="bg-white border border-zinc-100 rounded-[2rem] p-6">
             <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Catalogo de paquetes</h4>
             <div className="space-y-3 max-h-[480px] overflow-y-auto">
-              {packages.map((pkg) => (
+              {visiblePackages.map((pkg) => (
                 <div key={pkg.id} className="border border-zinc-100 rounded-xl p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
@@ -1204,6 +1262,33 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 </div>
               ))}
               {packages.length === 0 && <p className="text-sm text-zinc-400">Aun no hay paquetes registrados.</p>}
+              {packages.length > 0 && (
+                <div className="flex items-center justify-between gap-2 pt-2">
+                  <p className="text-[11px] text-zinc-500">
+                    Mostrando {Math.min(packageVisibleCount, packages.length)} de {packages.length} paquetes
+                  </p>
+                  <div className="flex gap-2">
+                    {packageVisibleCount < packages.length && (
+                      <button
+                        type="button"
+                        onClick={() => setPackageVisibleCount((prev) => Math.min(prev + PACKAGE_LIST_STEP, packages.length))}
+                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        Ver mas
+                      </button>
+                    )}
+                    {packageVisibleCount > PACKAGE_LIST_STEP && (
+                      <button
+                        type="button"
+                        onClick={() => setPackageVisibleCount(PACKAGE_LIST_STEP)}
+                        className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        Ver menos
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             </div>
           </div>
@@ -1374,12 +1459,15 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                 </div>
               </div>
 
-              <div className="space-y-3 max-h-[420px] overflow-y-auto">
+              <div className="max-h-[420px] overflow-y-auto space-y-3">
                 {sortedHighlights.length === 0 && <p className="text-sm text-zinc-400">Aún no hay highlights registrados.</p>}
-                {sortedHighlights.map((item, idx) => (
-                  <div key={item.id} className="border border-zinc-100 rounded-xl p-3 space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {visibleHighlights.map((item) => {
+                  const globalIndex = sortedHighlights.findIndex((x: any) => x.id === item.id);
+                  return (
+                  <div key={item.id} className="border border-zinc-100 rounded-xl p-2.5 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-black text-zinc-900 uppercase tracking-tight">#{idx + 1} · {item.title}</p>
+                      <p className="font-black text-zinc-900 uppercase tracking-tight">#{globalIndex + 1} · {item.title}</p>
                       <button
                         type="button"
                         onClick={() => handleToggleHighlight(item)}
@@ -1391,17 +1479,17 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                       </button>
                     </div>
                     {item.image_url && (
-                      <img src={String(item.image_url)} alt={item.title} className="w-full h-28 object-cover rounded-xl border border-zinc-200" />
+                      <img src={String(item.image_url)} alt={item.title} className="w-full h-24 object-cover rounded-lg border border-zinc-200" />
                     )}
                     <p className="text-xs text-zinc-500">{item.subtitle || 'Sin subtítulo'}</p>
                     <p className="text-[10px] text-zinc-500">
                       Orden: {Number(item.sort_order || 0)} | Vigencia: {item.start_at ? new Date(item.start_at).toLocaleDateString('es-MX') : 'Sin inicio'} - {item.end_at ? new Date(item.end_at).toLocaleDateString('es-MX') : 'Sin fin'}
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => handleMoveHighlight(item.id, 'up')}
-                        disabled={idx === 0}
+                        disabled={globalIndex === 0}
                         className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px] disabled:opacity-40"
                       >
                         Subir
@@ -1409,7 +1497,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                       <button
                         type="button"
                         onClick={() => handleMoveHighlight(item.id, 'down')}
-                        disabled={idx === sortedHighlights.length - 1}
+                        disabled={globalIndex === sortedHighlights.length - 1}
                         className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest min-h-[44px] disabled:opacity-40"
                       >
                         Bajar
@@ -1430,7 +1518,35 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                       </button>
                     </div>
                   </div>
-                ))}
+                )})}
+                </div>
+                {sortedHighlights.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <p className="text-[11px] text-zinc-500">
+                      Mostrando {Math.min(highlightVisibleCount, sortedHighlights.length)} de {sortedHighlights.length} highlights
+                    </p>
+                    <div className="flex gap-2">
+                      {highlightVisibleCount < sortedHighlights.length && (
+                        <button
+                          type="button"
+                          onClick={() => setHighlightVisibleCount((prev) => Math.min(prev + HIGHLIGHT_LIST_STEP, sortedHighlights.length))}
+                          className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Ver mas
+                        </button>
+                      )}
+                      {highlightVisibleCount > HIGHLIGHT_LIST_STEP && (
+                        <button
+                          type="button"
+                          onClick={() => setHighlightVisibleCount(HIGHLIGHT_LIST_STEP)}
+                          className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          Ver menos
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1539,6 +1655,33 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
 
           <div className="bg-white border border-zinc-100 rounded-[2rem] p-6 overflow-x-auto">
             <h4 className="text-2xl font-bebas uppercase tracking-wide text-zinc-900 mb-4">Comunidad y estatus en tiempo real</h4>
+            {community.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] text-zinc-500">
+                  Mostrando {Math.min(communityVisibleCount, community.length)} de {community.length} alumnos
+                </p>
+                <div className="flex gap-2">
+                  {communityVisibleCount < community.length && (
+                    <button
+                      type="button"
+                      onClick={() => setCommunityVisibleCount((prev) => Math.min(prev + COMMUNITY_LIST_STEP, community.length))}
+                      className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Ver mas
+                    </button>
+                  )}
+                  {communityVisibleCount > COMMUNITY_LIST_STEP && (
+                    <button
+                      type="button"
+                      onClick={() => setCommunityVisibleCount(COMMUNITY_LIST_STEP)}
+                      className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Ver menos
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="text-left text-zinc-400 uppercase text-[10px] tracking-widest">
@@ -1560,7 +1703,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   </td>
                 </tr>
               ) : (
-                community.map((student) => (
+                visibleCommunity.map((student) => (
                   <tr key={student.id} className={`border-t ${student.warning_low_battery ? 'border-amber-300 bg-amber-50/40' : 'border-zinc-100'}`}>
                     <td className="py-4">
                       <p className="font-black text-zinc-900">{student.full_name}</p>
@@ -1909,7 +2052,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                     {(selectedStudentDetail.subscriptions || []).length === 0 && (
                       <p className="text-sm text-zinc-400">Sin historial de suscripciones.</p>
                     )}
-                    {(selectedStudentDetail.subscriptions || []).map((sub: any) => (
+                    {visibleSubscriptionHistory.map((sub: any) => (
                       <div key={sub.id} className="text-xs bg-zinc-50 rounded-lg p-2">
                         <span className="font-black">{sub.package_name || 'Manual'}</span> | {sub.estado} | {sub.clases_restantes}/{sub.clases_totales}
                         <span className="block text-zinc-500 mt-1">
@@ -1917,6 +2060,33 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                         </span>
                       </div>
                     ))}
+                    {studentSubscriptions.length > 0 && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-zinc-500">
+                          Mostrando {Math.min(subscriptionVisibleCount, studentSubscriptions.length)} de {studentSubscriptions.length}
+                        </p>
+                        <div className="flex gap-2">
+                          {subscriptionVisibleCount < studentSubscriptions.length && (
+                            <button
+                              type="button"
+                              onClick={() => setSubscriptionVisibleCount((prev) => Math.min(prev + SUBSCRIPTION_LIST_STEP, studentSubscriptions.length))}
+                              className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                            >
+                              Ver mas
+                            </button>
+                          )}
+                          {subscriptionVisibleCount > SUBSCRIPTION_LIST_STEP && (
+                            <button
+                              type="button"
+                              onClick={() => setSubscriptionVisibleCount(SUBSCRIPTION_LIST_STEP)}
+                              className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                            >
+                              Ver menos
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1963,7 +2133,7 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                     {filteredActivityRows.length === 0 && (
                       <p className="text-sm text-zinc-400">Sin actividad registrada.</p>
                     )}
-                    {filteredActivityRows.map((row: any, index: number) => (
+                    {visibleActivityRows.map((row: any, index: number) => (
                       <div key={`${row.tipo}_${row.timestamp}_${index}`} className="text-xs bg-zinc-50 rounded-lg p-2">
                         <p className="font-black text-zinc-900 uppercase">
                           {row.tipo === 'attendance'
@@ -1988,6 +2158,33 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                         <p className="text-zinc-500">{row.fecha} {row.hora || ''} {row.motivo ? `| ${row.motivo}` : ''}</p>
                       </div>
                     ))}
+                    {filteredActivityRows.length > 0 && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-zinc-500">
+                          Mostrando {Math.min(activityVisibleCount, filteredActivityRows.length)} de {filteredActivityRows.length}
+                        </p>
+                        <div className="flex gap-2">
+                          {activityVisibleCount < filteredActivityRows.length && (
+                            <button
+                              type="button"
+                              onClick={() => setActivityVisibleCount((prev) => Math.min(prev + ACTIVITY_LIST_STEP, filteredActivityRows.length))}
+                              className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                            >
+                              Ver mas
+                            </button>
+                          )}
+                          {activityVisibleCount > ACTIVITY_LIST_STEP && (
+                            <button
+                              type="button"
+                              onClick={() => setActivityVisibleCount(ACTIVITY_LIST_STEP)}
+                              className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                            >
+                              Ver menos
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2078,15 +2275,42 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
               <div className="bg-white border border-zinc-100 rounded-2xl p-5">
                 <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500 mb-3">Ventas por paquete</h5>
                 <div className="space-y-2">
-                  {(cashCutData.porPaquete || []).length === 0 && (
+                  {cashPackageRows.length === 0 && (
                     <p className="text-sm text-zinc-400">Sin ventas en el periodo seleccionado.</p>
                   )}
-                  {(cashCutData.porPaquete || []).map((item: any) => (
-                    <div key={`${item.paquete}_${item.ventas}`} className="flex items-center justify-between text-sm border border-zinc-100 rounded-lg p-3">
+                  {visibleCashPackageRows.map((item: any) => (
+                    <div key={`${item.paquete}_${item.ventas}`} className="flex items-center justify-between text-xs sm:text-sm border border-zinc-100 rounded-lg p-2.5">
                       <span className="font-black text-zinc-900">{item.paquete}</span>
                       <span>{item.ventas} ventas | <span className="font-black text-brand">{money(Number(item.ingresos || 0))}</span></span>
                     </div>
                   ))}
+                  {cashPackageRows.length > 0 && (
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <p className="text-[11px] text-zinc-500">
+                        Mostrando {Math.min(cashPackageVisibleCount, cashPackageRows.length)} de {cashPackageRows.length} paquetes
+                      </p>
+                      <div className="flex gap-2">
+                        {cashPackageVisibleCount < cashPackageRows.length && (
+                          <button
+                            type="button"
+                            onClick={() => setCashPackageVisibleCount((prev) => Math.min(prev + CASH_LIST_STEP, cashPackageRows.length))}
+                            className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Ver mas
+                          </button>
+                        )}
+                        {cashPackageVisibleCount > CASH_LIST_STEP && (
+                          <button
+                            type="button"
+                            onClick={() => setCashPackageVisibleCount(CASH_LIST_STEP)}
+                            className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Ver menos
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2096,22 +2320,64 @@ export const CoachBusinessPanel: React.FC<CoachBusinessPanelProps> = ({ user }) 
                   { key: 'semanal', title: 'Desglose semanal' },
                   { key: 'mensual', title: 'Desglose mensual' },
                   { key: 'anual', title: 'Desglose anual' }
-                ].map((section) => (
-                  <div key={section.key} className="bg-white border border-zinc-100 rounded-2xl p-5">
-                    <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500 mb-3">{section.title}</h5>
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {(cashCutData.desglose?.[section.key] || []).length === 0 && (
-                        <p className="text-sm text-zinc-400">Sin registros para este desglose.</p>
-                      )}
-                      {(cashCutData.desglose?.[section.key] || []).map((row: any) => (
-                        <div key={`${section.key}_${row.periodo}`} className="flex items-center justify-between text-sm border border-zinc-100 rounded-lg p-3">
-                          <span className="font-black text-zinc-900">{row.periodo}</span>
-                          <span>{row.ventas} ventas | <span className="font-black text-brand">{money(Number(row.ingresos || 0))}</span></span>
-                        </div>
-                      ))}
+                ].map((section) => {
+                  const allRows = Array.isArray(cashCutData.desglose?.[section.key]) ? cashCutData.desglose[section.key] : [];
+                  const visibleCount = cashBreakdownVisible[section.key] ?? CASH_LIST_STEP;
+                  const visibleRows = allRows.slice(0, visibleCount);
+                  return (
+                    <div key={section.key} className="bg-white border border-zinc-100 rounded-2xl p-5">
+                      <h5 className="font-black uppercase tracking-widest text-[11px] text-zinc-500 mb-3">{section.title}</h5>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {allRows.length === 0 && (
+                          <p className="text-sm text-zinc-400">Sin registros para este desglose.</p>
+                        )}
+                        {visibleRows.map((row: any) => (
+                          <div key={`${section.key}_${row.periodo}`} className="flex items-center justify-between text-xs sm:text-sm border border-zinc-100 rounded-lg p-2.5">
+                            <span className="font-black text-zinc-900">{row.periodo}</span>
+                            <span>{row.ventas} ventas | <span className="font-black text-brand">{money(Number(row.ingresos || 0))}</span></span>
+                          </div>
+                        ))}
+                        {allRows.length > 0 && (
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <p className="text-[11px] text-zinc-500">
+                              Mostrando {Math.min(visibleCount, allRows.length)} de {allRows.length}
+                            </p>
+                            <div className="flex gap-2">
+                              {visibleCount < allRows.length && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setCashBreakdownVisible((prev) => ({
+                                      ...prev,
+                                      [section.key]: Math.min((prev[section.key] ?? CASH_LIST_STEP) + CASH_LIST_STEP, allRows.length)
+                                    }))
+                                  }
+                                  className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-700 text-[10px] font-black uppercase tracking-widest"
+                                >
+                                  Ver mas
+                                </button>
+                              )}
+                              {visibleCount > CASH_LIST_STEP && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setCashBreakdownVisible((prev) => ({
+                                      ...prev,
+                                      [section.key]: CASH_LIST_STEP
+                                    }))
+                                  }
+                                  className="px-3 py-2 rounded-lg bg-zinc-100 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+                                >
+                                  Ver menos
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}

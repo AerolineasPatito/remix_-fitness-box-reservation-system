@@ -333,6 +333,7 @@ const cancelClassForMinimum = async (classId: string) => {
       [classId]
     );
 
+    const subscriptionCreditUserIds = new Set<string>();
     for (const reservation of activeReservations) {
       if (reservation.beneficiario_id) {
         await client.query(
@@ -344,6 +345,7 @@ const cancelClassForMinimum = async (classId: string) => {
         `,
           [reservation.beneficiario_id]
         );
+        subscriptionCreditUserIds.add(String(reservation.user_id || ''));
       }
 
       if (reservation.suscripcion_id) {
@@ -357,6 +359,20 @@ const cancelClassForMinimum = async (classId: string) => {
         `,
           [reservation.suscripcion_id]
         );
+        subscriptionCreditUserIds.add(String(reservation.user_id || ''));
+      }
+
+      if (!reservation.beneficiario_id) {
+        await client.query(
+          `
+          UPDATE profiles
+          SET credits_remaining = credits_remaining + 1,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+            AND deleted_at IS NULL
+        `,
+          [reservation.user_id]
+        );
       }
     }
 
@@ -365,7 +381,8 @@ const cancelClassForMinimum = async (classId: string) => {
     const affectedStudentIds = Array.from(
       new Set(activeReservations.map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
-    for (const studentId of affectedStudentIds) {
+    const subscriptionStudents = Array.from(subscriptionCreditUserIds).filter(Boolean);
+    for (const studentId of subscriptionStudents) {
       await syncStudentCredits(String(studentId));
     }
 
@@ -1408,6 +1425,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
     );
 
     const isEventClass = Number(classInfo.is_event || 0) === 1;
+    const subscriptionCreditUserIds = new Set<string>();
     if (!isEventClass) {
       for (const reservation of activeReservations) {
         if (reservation.beneficiario_id) {
@@ -1420,6 +1438,7 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
           `,
             [reservation.beneficiario_id]
           );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
         }
 
         if (reservation.suscripcion_id) {
@@ -1433,6 +1452,19 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
           `,
             [reservation.suscripcion_id]
           );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
+        }
+        if (!reservation.beneficiario_id) {
+          await client.query(
+            `
+            UPDATE profiles
+            SET credits_remaining = credits_remaining + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND deleted_at IS NULL
+          `,
+            [reservation.user_id]
+          );
         }
       }
     }
@@ -1442,7 +1474,8 @@ app.patch('/api/classes/:id/cancel', async (req, res) => {
     const affectedStudentIds = Array.from(
       new Set(activeReservations.map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
-    for (const studentId of affectedStudentIds) {
+    const subscriptionStudents = Array.from(subscriptionCreditUserIds).filter(Boolean);
+    for (const studentId of subscriptionStudents) {
       await syncStudentCredits(String(studentId));
     }
 
@@ -1535,6 +1568,7 @@ app.delete('/api/classes/:id', async (req, res) => {
       [classId]
     );
 
+    const subscriptionCreditUserIds = new Set<string>();
     if (!isEventClass) {
       for (const reservation of activeReservations.rows as any[]) {
         if (reservation.beneficiario_id) {
@@ -1542,11 +1576,25 @@ app.delete('/api/classes/:id', async (req, res) => {
             `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [reservation.beneficiario_id]
           );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
         }
         if (reservation.suscripcion_id) {
           await client.query(
             `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [reservation.suscripcion_id]
+          );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
+        }
+        if (!reservation.beneficiario_id) {
+          await client.query(
+            `
+            UPDATE profiles
+            SET credits_remaining = credits_remaining + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND deleted_at IS NULL
+          `,
+            [reservation.user_id]
           );
         }
       }
@@ -1573,7 +1621,7 @@ app.delete('/api/classes/:id', async (req, res) => {
       new Set((activeReservations.rows as any[]).map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
     if (!isEventClass) {
-      for (const studentId of affectedStudentIds) {
+      for (const studentId of Array.from(subscriptionCreditUserIds).filter(Boolean)) {
         await syncStudentCredits(String(studentId));
       }
     }
@@ -1645,6 +1693,7 @@ app.post('/api/reservations', async (req, res) => {
 
     const isEventClass = Number(classInfo.is_event || 0) === 1;
     let beneficiary: any = null;
+    let usedManualProfileCredit = false;
     if (!isEventClass) {
       const beneficiaryResult = await client.query(
         `
@@ -1669,6 +1718,33 @@ app.post('/api/reservations', async (req, res) => {
         [userId]
       );
       beneficiary = beneficiaryResult.rows[0];
+      if (!beneficiary) {
+        const profileCreditsResult = await client.query(
+          `
+          SELECT credits_remaining
+          FROM profiles
+          WHERE id = $1
+            AND deleted_at IS NULL
+          FOR UPDATE
+        `,
+          [userId]
+        );
+        const profileCredits = Number(profileCreditsResult.rows[0]?.credits_remaining || 0);
+        if (profileCredits > 0) {
+          await client.query(
+            `
+            UPDATE profiles
+            SET credits_remaining = credits_remaining - 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND deleted_at IS NULL
+          `,
+            [userId]
+          );
+          usedManualProfileCredit = true;
+          beneficiary = { id: null, suscripcion_id: null };
+        }
+      }
       if (!beneficiary) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'No tienes créditos suficientes para reservar esta clase.' });
@@ -1715,7 +1791,7 @@ app.post('/api/reservations', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    if (!isEventClass) {
+    if (!isEventClass && !usedManualProfileCredit) {
       await syncStudentCredits(userId);
     }
 
@@ -1814,6 +1890,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
       [reservationId]
     );
 
+    let shouldSyncSubscriptionCredits = false;
     if (canRefund && reservation.beneficiario_id && reservation.suscripcion_id) {
       await client.query(
         `
@@ -1833,10 +1910,22 @@ app.delete('/api/reservations/:id', async (req, res) => {
       `,
         [reservation.suscripcion_id]
       );
+      shouldSyncSubscriptionCredits = true;
+    } else if (canRefund && !reservation.beneficiario_id) {
+      await client.query(
+        `
+        UPDATE profiles
+        SET credits_remaining = credits_remaining + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND deleted_at IS NULL
+      `,
+        [reservation.user_id]
+      );
     }
 
     await client.query('COMMIT');
-    if (!isEventClass) {
+    if (!isEventClass && shouldSyncSubscriptionCredits) {
       await syncStudentCredits(reservation.user_id);
     }
 
@@ -3930,6 +4019,7 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
       [classId]
     );
 
+    const subscriptionCreditUserIds = new Set<string>();
     if (!isEventClass) {
       for (const reservation of activeReservations.rows as any[]) {
         if (reservation.beneficiario_id) {
@@ -3937,11 +4027,25 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
             `UPDATE suscripcion_beneficiarios SET clases_restantes = clases_restantes + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [reservation.beneficiario_id]
           );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
         }
         if (reservation.suscripcion_id) {
           await client.query(
             `UPDATE suscripciones_alumno SET clases_restantes = clases_restantes + 1, clases_consumidas = GREATEST(clases_consumidas - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
             [reservation.suscripcion_id]
+          );
+          subscriptionCreditUserIds.add(String(reservation.user_id || ''));
+        }
+        if (!reservation.beneficiario_id) {
+          await client.query(
+            `
+            UPDATE profiles
+            SET credits_remaining = credits_remaining + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+              AND deleted_at IS NULL
+          `,
+            [reservation.user_id]
           );
         }
       }
@@ -3969,7 +4073,7 @@ app.delete('/api/admin/classes/:id', async (req, res) => {
       new Set((activeReservations.rows as any[]).map((r) => String(r.user_id || '').trim()).filter(Boolean))
     );
     if (!isEventClass) {
-      for (const studentId of affectedStudentIds) {
+      for (const studentId of Array.from(subscriptionCreditUserIds).filter(Boolean)) {
         await syncStudentCredits(studentId);
       }
     }
@@ -4031,6 +4135,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
 
     const isEventClass = Number(reservation.class_is_event || 0) === 1;
     const shouldRefund = String(reservation.status || '').toLowerCase() === 'active' && !isEventClass;
+    let shouldSyncSubscriptionCredits = false;
     if (shouldRefund && reservation.beneficiario_id) {
       await client.query(
         `
@@ -4041,6 +4146,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
       `,
         [reservation.beneficiario_id]
       );
+      shouldSyncSubscriptionCredits = true;
     }
     if (shouldRefund && reservation.suscripcion_id) {
       await client.query(
@@ -4052,6 +4158,19 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
         WHERE id = $1
       `,
         [reservation.suscripcion_id]
+      );
+      shouldSyncSubscriptionCredits = true;
+    }
+    if (shouldRefund && !reservation.beneficiario_id) {
+      await client.query(
+        `
+        UPDATE profiles
+        SET credits_remaining = credits_remaining + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND deleted_at IS NULL
+      `,
+        [reservation.user_id]
       );
     }
 
@@ -4067,7 +4186,7 @@ app.delete('/api/admin/reservations/:id', async (req, res) => {
     );
 
     await client.query('COMMIT');
-    if (reservation.user_id && !isEventClass) {
+    if (reservation.user_id && !isEventClass && shouldSyncSubscriptionCredits) {
       await syncStudentCredits(reservation.user_id);
     }
     res.json({ success: true, refunded: shouldRefund });

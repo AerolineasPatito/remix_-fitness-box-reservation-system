@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Button, Card, TextInput } from './ui/index.ts';
 
 interface ForgotPasswordProps {
   onBack?: () => void;
@@ -56,7 +57,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
           </div>
 
           {/* Instructions */}
-          <div className="bg-emerald-50 border border-emerald-100 p-6 sm:p-8 rounded-2xl sm:rounded-3xl space-y-4">
+          <Card className="bg-success/10 border-success/20 p-6 sm:p-8 rounded-2xl sm:rounded-3xl space-y-4">
             <div className="flex items-center space-x-3">
               <i className="fas fa-info-circle text-emerald-500 text-lg"></i>
               <p className="text-[10px] font-black text-emerald-800 uppercase tracking-widest">Siguientes Pasos:</p>
@@ -67,24 +68,25 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
               <li>• Haz clic en el enlace de restablecimiento</li>
               <li>• Crea tu nueva contraseña</li>
             </ul>
-          </div>
+          </Card>
 
           {/* Actions */}
           <div className="space-y-3">
-            <button 
+            <Button
               onClick={onBack || (() => window.location.href = '/')}
-              className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+              className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
             >
               <span>Volver al Inicio</span>
               <i className="fas fa-home text-[8px] sm:text-[10px]"></i>
-            </button>
+            </Button>
             
-            <button 
+            <Button
+              variant="secondary"
               onClick={() => setSuccess(false)}
-              className="w-full py-4 sm:py-6 bg-zinc-100 text-zinc-600 font-black rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] uppercase tracking-widest hover:bg-zinc-200 transition-all"
+              className="w-full py-4 sm:py-6 rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] tracking-widest"
             >
               Enviar a otro correo
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -124,21 +126,21 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
               <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
                 Correo Electrónico
               </label>
-              <input
+              <TextInput
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-sm sm:text-base font-bold text-zinc-900 outline-none focus:border-brand transition-all"
                 placeholder="tu@email.com"
                 required
+                inputClassName="font-bold"
               />
             </div>
           </div>
 
-          <button 
+          <Button
             type="submit" 
             disabled={loading}
-            className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-2xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+            className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-2xl active:scale-95"
           >
             {loading ? (
               <i className="fas fa-circle-notch fa-spin text-sm sm:text-base"></i>
@@ -148,7 +150,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack }) => {
                 <i className="fas fa-paper-plane text-xs sm:text-sm"></i>
               </>
             )}
-          </button>
+          </Button>
         </form>
 
         {/* Help Text */}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { api, logger } from '../lib/api.ts';
-import { Profile } from '../types.ts';
 import { ForgotPassword } from './ForgotPassword.tsx';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Button, Card, TextInput } from './ui/index.ts';
 
 interface AuthProps {
   onLogin: (session: any) => void;
@@ -152,7 +152,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           </p>
         </div>
 
-        <div className="bg-white border-2 border-zinc-100 p-8 sm:p-12 rounded-[3rem] sm:rounded-[4rem] shadow-2xl shadow-zinc-200/50 space-y-6 sm:space-y-8">
+        <Card className="border-2 border-neutral-100 p-8 sm:p-12 rounded-[3rem] sm:rounded-[4rem] shadow-2xl shadow-neutral-200/50 space-y-6 sm:space-y-8">
           {error && (
             <div className="space-y-3 sm:space-y-4 animate-in fade-in zoom-in duration-300">
               <div className="bg-rose-50 text-rose-500 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-center border border-rose-100">
@@ -163,61 +163,53 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
           <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-8">
             {!isLogin && (
-              <div className="space-y-2 sm:space-y-3">
-                <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Nombre Completo</label>
-                <input 
-                  required
-                  type="text"
-                  className="w-full bg-zinc-50 border border-zinc-100 rounded-[1.2rem] sm:rounded-[1.5rem] px-6 sm:px-8 py-4 sm:py-5 focus:border-brand focus:bg-white transition-all text-sm outline-none font-bold"
-                  placeholder="Nombre completo"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                />
-              </div>
+              <TextInput
+                required
+                label="Nombre Completo"
+                type="text"
+                placeholder="Nombre completo"
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+                inputClassName="font-bold"
+              />
             )}
 
             {!isLogin && (
-              <div className="space-y-2 sm:space-y-3">
-                <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">WhatsApp</label>
-                <input
-                  required
-                  type="tel"
-                  className="w-full bg-zinc-50 border border-zinc-100 rounded-[1.2rem] sm:rounded-[1.5rem] px-6 sm:px-8 py-4 sm:py-5 focus:border-brand focus:bg-white transition-all text-sm outline-none font-bold"
-                  placeholder="+5215512345678"
-                  value={whatsappPhone}
-                  onChange={e => setWhatsappPhone(e.target.value)}
-                />
-              </div>
+              <TextInput
+                required
+                label="WhatsApp"
+                type="tel"
+                placeholder="+5215512345678"
+                value={whatsappPhone}
+                onChange={e => setWhatsappPhone(e.target.value)}
+                inputClassName="font-bold"
+              />
             )}
 
-            <div className="space-y-2 sm:space-y-3">
-              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Correo electrónico o usuario</label>
-              <input 
-                required
-                type="text"
-                className="w-full bg-zinc-50 border border-zinc-100 rounded-[1.2rem] sm:rounded-[1.5rem] px-6 sm:px-8 py-4 sm:py-5 focus:border-brand focus:bg-white transition-all text-sm outline-none font-bold"
-                placeholder="atleta@focusfitnessmvt.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
+            <TextInput
+              required
+              label="Correo electrónico o usuario"
+              type="text"
+              placeholder="atleta@focusfitnessmvt.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              inputClassName="font-bold"
+            />
 
-            <div className="space-y-2 sm:space-y-3">
-              <label className="text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-2">Contraseña segura</label>
-              <input 
-                required
-                type="password"
-                className="w-full bg-zinc-50 border border-zinc-100 rounded-[1.2rem] sm:rounded-[1.5rem] px-6 sm:px-8 py-4 sm:py-5 focus:border-brand focus:bg-white transition-all text-sm outline-none font-bold"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
+            <TextInput
+              required
+              label="Contraseña segura"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              inputClassName="font-bold"
+            />
 
-            <button 
+            <Button
               type="submit" 
               disabled={loading}
-              className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[1.8rem] sm:rounded-[2rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+              className="w-full py-6 sm:py-8 rounded-[1.8rem] sm:rounded-[2rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
               aria-label={isLogin ? 'Iniciar sesión en Focus Fitness' : 'Crear nueva cuenta en Focus Fitness'}
             >
               {loading ? <i className="fas fa-circle-notch fa-spin" aria-hidden="true"></i> : (
@@ -226,7 +218,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                   <i className="fas fa-arrow-right text-[8px] sm:text-[10px]" aria-hidden="true"></i>
                 </>
               )}
-            </button>
+            </Button>
           </form>
 
           {/* Forgot Password Link - Only show on login */}
@@ -241,7 +233,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
               </button>
             </div>
           )}
-        </div>
+        </Card>
 
         <div className="text-center">
           <button 

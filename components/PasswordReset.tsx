@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getFriendlyErrorMessage } from '../lib/errorMessages.ts';
+import { Button, TextInput } from './ui/index.ts';
 
 export const PasswordReset: React.FC = () => {
   const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'success'>('loading');
@@ -142,12 +143,13 @@ export const PasswordReset: React.FC = () => {
           <p className="text-zinc-400 text-[8px] sm:text-[10px] font-medium uppercase tracking-[0.3em]">
             {error}
           </p>
-          <button 
+          <Button
+            variant="danger"
             onClick={() => navigate('/')}
-            className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95"
+            className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
           >
             Volver al Inicio
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -179,13 +181,13 @@ export const PasswordReset: React.FC = () => {
           <p className="text-zinc-500 text-xs sm:text-sm font-bold uppercase tracking-widest">
             Tu contraseña ha sido actualizada exitosamente
           </p>
-          <button 
+          <Button
             onClick={() => navigate('/')}
-            className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+            className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
           >
             <span>Iniciar Sesión</span>
             <i className="fas fa-arrow-right text-[8px] sm:text-[10px]"></i>
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -238,14 +240,14 @@ export const PasswordReset: React.FC = () => {
               <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
                 Nueva Contraseña
               </label>
-              <input
+              <TextInput
                 type="password"
                 value={password}
                 onChange={handlePasswordChange}
-                className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-sm sm:text-base font-bold text-zinc-900 outline-none focus:border-brand transition-all"
                 placeholder="Mínimo 6 caracteres"
                 required
                 aria-describedby="password-strength"
+                inputClassName="font-bold"
               />
               
               {/* Password Strength Indicator */}
@@ -280,21 +282,21 @@ export const PasswordReset: React.FC = () => {
               <label className="block text-[8px] sm:text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
                 Confirmar Contraseña
               </label>
-              <input
+              <TextInput
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-zinc-50 border border-zinc-100 rounded-xl sm:rounded-2xl p-4 sm:p-6 text-sm sm:text-base font-bold text-zinc-900 outline-none focus:border-brand transition-all"
                 placeholder="Repite tu nueva contraseña"
                 required
+                inputClassName="font-bold"
               />
             </div>
           </div>
 
-          <button 
+          <Button
             type="submit" 
             disabled={loading}
-            className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-2xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+            className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-2xl active:scale-95"
           >
             {loading ? (
               <i className="fas fa-circle-notch fa-spin text-sm sm:text-base"></i>
@@ -304,7 +306,7 @@ export const PasswordReset: React.FC = () => {
                 <i className="fas fa-lock text-xs sm:text-sm"></i>
               </>
             )}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

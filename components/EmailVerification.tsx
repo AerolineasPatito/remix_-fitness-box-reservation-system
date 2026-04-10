@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Button, Card } from './ui/index.ts';
 
 export const EmailVerification: React.FC = () => {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -43,7 +44,7 @@ export const EmailVerification: React.FC = () => {
       <div className="absolute top-0 right-0 w-[300px] h-[300px] sm:w-[500px] sm:h-[500px] bg-brand/5 rounded-full -mr-24 -mt-24 sm:-mr-48 sm:-mt-48 blur-3xl"></div>
       <div className="absolute bottom-0 left-0 w-[300px] h-[300px] sm:w-[500px] sm:h-[500px] bg-brand/5 rounded-full -ml-24 -mb-24 sm:-ml-48 sm:-mb-48 blur-3xl"></div>
 
-      <div className="w-full max-w-md text-center space-y-8 relative z-10">
+      <Card className="w-full max-w-md text-center space-y-8 relative z-10 rounded-3xl border border-neutral-100 shadow-2xl">
         {/* Logo */}
         <div className="flex justify-center mb-6">
           <div className="w-40 h-14 sm:w-48 sm:h-16 flex items-center justify-center p-1 overflow-hidden">
@@ -92,34 +93,36 @@ export const EmailVerification: React.FC = () => {
         {/* Actions */}
         <div className="space-y-4">
           {status === 'success' && (
-            <button 
+            <Button
               onClick={() => navigate('/')}
-              className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95 flex items-center justify-center space-x-3 sm:space-x-4"
+              className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
             >
               <span>Iniciar Sesión</span>
               <i className="fas fa-arrow-right text-[8px] sm:text-[10px]"></i>
-            </button>
+            </Button>
           )}
           
           {status === 'error' && (
             <div className="space-y-3">
-              <button 
+              <Button
+                variant="danger"
                 onClick={() => window.location.reload()}
-                className="w-full py-6 sm:py-8 bg-zinc-900 hover:bg-brand text-white font-black rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] uppercase tracking-[0.4em] transition-all shadow-xl active:scale-95"
+                className="w-full py-6 sm:py-8 rounded-[2rem] sm:rounded-[2.5rem] text-[10px] sm:text-[12px] tracking-[0.4em] shadow-xl active:scale-95"
               >
                 Reintentar
-              </button>
+              </Button>
               
-              <button 
+              <Button
+                variant="secondary"
                 onClick={() => navigate('/')}
-                className="w-full py-4 sm:py-6 bg-zinc-100 text-zinc-600 font-black rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] uppercase tracking-widest hover:bg-zinc-200 transition-all"
+                className="w-full py-4 sm:py-6 rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] tracking-widest"
               >
                 Volver al Inicio
-              </button>
+              </Button>
             </div>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 };
